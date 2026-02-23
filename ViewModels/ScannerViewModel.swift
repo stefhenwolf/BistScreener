@@ -287,6 +287,9 @@ final class ScannerViewModel: ObservableObject {
         }
         guard !Task.isCancelled else { return }
 
+        // Debug sayaçlarını sıfırla
+        resetScanDebugCounters()
+
         let total = symbols.count
         let sem = AsyncSemaphore(value: concurrencyLimit)
 
@@ -351,6 +354,21 @@ final class ScannerViewModel: ObservableObject {
         if maxResults > 0, localResults.count > maxResults {
             localResults = Array(localResults.prefix(maxResults))
         }
+
+        // ✅ Debug özet (Xcode console)
+        #if DEBUG
+        print("""
+        ═══════════════════════════════════════════
+        📊 TARAMA ÖZET (\(indexSnap.title))
+           Toplam sembol: \(total)
+           Candle hatası: \(scanDebugCandleErrors)
+           Az mum (<50): \(scanDebugLowCandles)
+           Skor nil:     \(scanDebugScoreNil)
+           ✅ BUY sinyal: \(scanDebugPassed)
+           Preset: \(preset.rawValue) | minScore: \(preset.minBuyTotal)
+        ═══════════════════════════════════════════
+        """)
+        #endif
 
         // ✅ RAM overwrite
         resultsByIndex[indexSnap] = localResults
@@ -424,16 +442,38 @@ final class ScannerViewModel: ObservableObject {
 
     // MARK: - Single symbol scan (Tomorrow BUY-only)
 
+    // Debug sayaçları
+    private var scanDebugCandleErrors = 0
+    private var scanDebugLowCandles = 0
+    private var scanDebugScoreNil = 0
+    private var scanDebugPassed = 0
+
+    private func resetScanDebugCounters() {
+        scanDebugCandleErrors = 0
+        scanDebugLowCandles = 0
+        scanDebugScoreNil = 0
+        scanDebugPassed = 0
+        SignalScorer.resetDebugCounter()
+    }
+
     private func scanOneTomorrow(symbol: String) async -> ScanResult? {
         do {
             let candles = try await loadCandlesForScan(symbol: symbol)
-            guard candles.count >= 80 else { return nil } // EMA50 + güvenli
 
-            let recent = Array(candles.suffix(80))  // 160 -> 80
-            guard recent.count >= 80 else { return nil }
+            guard candles.count >= 50 else {
+                #if DEBUG
+                if scanDebugLowCandles < 3 {
+                    print("📊 \(symbol): az mum (\(candles.count))")
+                }
+                #endif
+                scanDebugLowCandles += 1
+                return nil
+            }
+
+            let recent = Array(candles.suffix(120)) // EMA50 + lookback + marj
 
             let last = recent[recent.count - 1]
-            let prev = recent[recent.count - 2]
+            let prev = recent.count >= 2 ? recent[recent.count - 2] : last
             let changePct = ((last.close - prev.close) / max(prev.close, 0.000001)) * 100.0
 
             // patterns istersen UI'da göstermek için kalsın (opsiyonel)
@@ -447,9 +487,14 @@ final class ScannerViewModel: ObservableObject {
                 lookback: lookback
             )
 
-            guard let tomo else { return nil } // BUY değil
+            guard let tomo else {
+                scanDebugScoreNil += 1
+                return nil
+            }
 
-            var res = ScanResult(
+            scanDebugPassed += 1
+
+            let res = ScanResult(
                 symbol: symbol,
                 lastDate: last.date,
                 lastClose: last.close,
@@ -467,15 +512,21 @@ final class ScannerViewModel: ObservableObject {
             return res
 
         } catch {
+            #if DEBUG
+            if scanDebugCandleErrors < 3 {
+                print("📊 \(symbol): candle yükleme hatası: \(error.localizedDescription)")
+            }
+            #endif
+            scanDebugCandleErrors += 1
             return nil
         }
     }
 
-    /// Cache varsa hızlı (>=80). Yoksa 3mo indirir (hızlı scan için).
+    /// Cache varsa hızlı (>=50). Yoksa 6mo indirir.
     private func loadCandlesForScan(symbol: String) async throws -> [Candle] {
         let sym = symbol.normalizedBISTSymbol()
 
-        if let disk = await CandleCache.shared.load(symbol: sym), disk.count >= 80 {
+        if let disk = await CandleCache.shared.load(symbol: sym), disk.count >= 50 {
             return disk
         }
 
@@ -483,8 +534,8 @@ final class ScannerViewModel: ObservableObject {
 
         return try await services.candles.getCandles(
             symbol: sym,
-            range: .mo6,  // 6 months (hızlı - cache varsa)
-            minCount: 80,  // 160 -> 80 (yeterli)
+            range: .mo6,
+            minCount: 50,
             forceRefresh: false
         )
     }
