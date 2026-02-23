@@ -440,10 +440,11 @@ final class ScannerViewModel: ObservableObject {
             let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(60)))  // 120 -> 60
 
             // ✅ Tomorrow BUY-only
+            let lookback = preset == .relaxed ? 10 : 20  // Kısa lookback for relaxed
             let tomo = SignalScorer.scoreTomorrowBuyOnly(
                 candles: recent,
                 preset: preset,
-                lookback: 20
+                lookback: lookback
             )
 
             guard let tomo else { return nil } // BUY değil

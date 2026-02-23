@@ -18,9 +18,9 @@ enum TomorrowPreset: String, Codable, CaseIterable {
     /// BUY minimum total threshold
     var minBuyTotal: Int {
         switch self {
-        case .relaxed: return 52  // Daha gevşek
-        case .normal:  return 58  // Normal (eski relaxed)
-        case .strict:  return 65  // Strict (eski normal)
+        case .relaxed: return 45  // Çok gevşek (test için)
+        case .normal:  return 55  // Normal
+        case .strict:  return 65  // Strict
         }
     }
 
@@ -194,9 +194,12 @@ enum SignalScorer {
         }()
         guard didBreakout else { return nil }
 
-        // ---------- Compression (last 8 bars) - relaxed for relaxed preset
-        let compression = compressionOK(candles: candles, window: 8, preset: preset)
-        guard compression.ok else { return nil }
+        // ---------- Compression (last 8 bars) - skip for relaxed preset
+        let compression: (ok: Bool, flagsHit: Int) = {
+            if preset == .relaxed { return (true, 0) }  // Skip compression for relaxed
+            return compressionOK(candles: candles, window: 8, preset: preset)
+        }()
+        if preset != .relaxed { guard compression.ok else { return nil } }
 
         // ---------- Expansion (TR spike)
         let trSeries = TrueRange.calculate(candles: candles)
@@ -207,8 +210,8 @@ enum SignalScorer {
         let trSpikeMultiple = trToday / trMedian20
         let minTRSpike: Double = {
             switch tier {
-            case .a, .b: return preset == .strict ? 1.3 : 1.15
-            case .c:     return preset == .relaxed ? 1.3 : 1.5
+            case .a, .b: return preset == .relaxed ? 1.0 : 1.15
+            case .c:     return preset == .relaxed ? 1.1 : 1.5
             case .none:  return .infinity
             }
         }()
