@@ -84,7 +84,7 @@ final class ScannerViewModel: ObservableObject {
         services: AppServices,
         defaultIndex: IndexOption = .bistAll,
         concurrencyLimit: Int = 8,
-        preset: TomorrowPreset = .normal,
+        preset: TomorrowPreset = .relaxed,
         maxResults: Int = 0
     ) {
         self.services = services

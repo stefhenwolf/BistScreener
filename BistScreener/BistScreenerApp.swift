@@ -1,32 +1,21 @@
-//
-//  BistScreenerApp.swift
-//  BistScreener
-//
-//  Created by Sedat Pala on 18.02.2026.
-//
-
 import SwiftUI
-import SwiftData
 
 @main
 struct BistScreenerApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    @StateObject private var watchlist = WatchlistStore()
+    @StateObject private var services = AppServices()
+    @StateObject private var settings = SettingsStore()
 
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    init() {
+        TVAppearance.apply()   // ✅ TabBar + NavBar TV görünümü
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(services: services, settings: settings)
+                .environmentObject(watchlist)
+                .environmentObject(services)
+                .environmentObject(settings)
         }
-        .modelContainer(sharedModelContainer)
     }
 }
