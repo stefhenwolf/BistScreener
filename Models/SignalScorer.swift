@@ -162,22 +162,20 @@ enum SignalScorer {
         // ---------- Trend filter (EMA)
         let ema20 = EMA.lastValue(values: closes, period: 20) ?? 0
         let ema50 = EMA.lastValue(values: closes, period: 50) ?? 0
+        let trendOK = (tier == .c) ? (last.close >= ema50) : (last.close >= ema20)
 
-        // Skip trend check for relaxed mode
         if preset != .relaxed {
-            let trendOK = (tier == .c) ? (last.close >= ema50) : (last.close >= ema20)
             guard trendOK else { return nil }
         }
 
         // ---------- Breakout (tier-based)
         let highestClose = BreakoutLevels.highestClose(closes: closes, lookback: lookback) ?? 0
         let highestHigh  = BreakoutLevels.highestHigh(highs: highs, lookback: lookback) ?? 0
+        let bufferPct: Double = preset == .relaxed ? 0 : (tier == .c ? 0.006 : 0.003)
+        let level = tier == .c ? highestHigh : highestClose
+        let didBreakout = last.close > (level * (1 + bufferPct))
 
-        // Skip breakout check for relaxed mode
         if preset != .relaxed {
-            let bufferPct: Double = preset == .relaxed ? 0 : (tier == .c ? 0.006 : 0.003)
-            let level = tier == .c ? highestHigh : highestClose
-            let didBreakout = last.close > (level * (1 + bufferPct))
             guard didBreakout else { return nil }
         }
 
