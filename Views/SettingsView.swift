@@ -58,6 +58,32 @@ struct SettingsView: View {
                                         .foregroundStyle(TVTheme.subtext)
                                 }
 
+                                // ✅ Manuel strateji ayarı (StrategyConfig)
+                                Divider().opacity(0.25)
+
+                                NavigationLink {
+                                    StrategyConfigEditorView()
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "slider.horizontal.3")
+                                        Text("Strateji Ayarı (Manual)")
+                                            .font(.system(size: 15, weight: .semibold))
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .foregroundStyle(TVTheme.subtext)
+                                    }
+                                    .foregroundStyle(TVTheme.text)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 12)
+                                    .background(TVTheme.surface2)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(TVTheme.stroke, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
                                 Divider().opacity(0.25)
 
                                 stepperRow(
@@ -132,7 +158,7 @@ struct SettingsView: View {
                                 }
 
                                 Button(role: .destructive) {
-                                    try? ScanSnapshotStore.deleteAll() // ✅ legacy + indexli hepsi
+                                    try? ScanSnapshotStore.deleteAll()
                                 } label: {
                                     HStack(spacing: 10) {
                                         Image(systemName: "trash")
@@ -159,6 +185,9 @@ struct SettingsView: View {
                         TVCard {
                             Button {
                                 settings.resetToDefaults()
+
+                                // Opsiyonel: StrategyConfig'i de default’a döndürmek istersen aç:
+                                // StrategyConfig.default.save()
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "arrow.counterclockwise")
@@ -201,9 +230,9 @@ struct SettingsView: View {
         case .relaxed:
             return "Daha fazla aday çıkarır (daha gevşek eşikler)."
         case .normal:
-            return "Dengeli mod: günlük makul sayıda BUY hedefi."
+            return "Normal mod StrategyConfig (manuel ayarlarını) kullanır."
         case .strict:
-            return "En seçici mod: Tier C kapalı, daha az ama daha kaliteli BUY."
+            return "En seçici mod: Tier C kapalı + daha sıkı eşikler."
         }
     }
 

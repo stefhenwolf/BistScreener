@@ -344,10 +344,11 @@ struct StockDetailView: View {
 
     private func metaLine(from t: TomorrowSignalScore) -> String? {
         let bd = t.breakdown
+        let prox = String(format: "Proximity %+.1f%%", (bd.proximityPct - 1.0) * 100)
+        let vol = String(format: "Vol x%.1f", bd.volumeTrend)
+        let comp = String(format: "Range %.2f", bd.rangeCompression)
         let clv = String(format: "CLV %.2f", bd.clv)
-        let vx  = String(format: "Value x%.2f", bd.valueMultiple)
-        let brk = (t.tier == .c) ? "Breakout \(bd.lookback)d High" : "Breakout \(bd.lookback)d Close"
-        return [clv, vx, brk].joined(separator: " • ")
+        return [prox, vol, comp, clv].joined(separator: " • ")
     }
 
     private func qualityBadge(_ q: String) -> some View {
@@ -414,10 +415,20 @@ struct StockDetailView: View {
                 VStack(spacing: 10) {
                     ForEach(patterns.sorted { $0.score > $1.score }.prefix(10), id: \.id) { p in
                         HStack {
-                            Text(p.pattern.rawValue)
-                                .foregroundStyle(TVTheme.text)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(p.pattern.rawValue)
+                                    .foregroundStyle(TVTheme.text)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .lineLimit(1)
+
+                                Text(p.pattern.direction == .bullish ? "Yukselen" : p.pattern.direction == .bearish ? "Dusen" : "Notr")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(
+                                        p.pattern.direction == .bullish ? TVTheme.up :
+                                        p.pattern.direction == .bearish ? TVTheme.down :
+                                        TVTheme.subtext
+                                    )
+                            }
 
                             Spacer()
 
@@ -510,10 +521,16 @@ struct StockDetailView: View {
             return
         }
 
-        // Patterns UI için güncelle (snapshot’tan gelmişse de canlıdakiyle değişmesi sorun değil)
-        patterns = PatternDetector.detectScored(last: Array(recent.suffix(120)))
+        // Patterns: canlı tespit et. Boş gelirse snapshot’takini koru.
+        let livePatterns = PatternDetector.detectScored(last: Array(recent.suffix(120)))
+        if !livePatterns.isEmpty {
+            patterns = livePatterns
+        } else if patterns.isEmpty, let snap = snapshot {
+            // Canlı boş VE mevcut de boş ise snapshot’tan yükle
+            patterns = snap.patterns
+        }
 
-        // Detail’de preset’i şimdilik normal tutuyoruz
+        // PRE-BREAKOUT: 20 günlük seviyeye yakınlık kontrolü
         tomorrow = SignalScorer.scoreTomorrowBuyOnly(
             candles: recent,
             preset: .normal,

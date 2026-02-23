@@ -3,4 +3,52 @@
    uuid = "9DEF0735-FEF2-40E2-95E2-B2373980BDE3"
    type = "1"
    version = "2.0">
+   <Breakpoints>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
+         <BreakpointContent
+            uuid = "4CA96431-0729-4FC8-B222-CFC75DD8AFD3"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            filePath = "Models/SignalScorer.swift"
+            startingColumnNumber = "9223372036854775807"
+            endingColumnNumber = "9223372036854775807"
+            startingLineNumber = "256"
+            endingLineNumber = "256"
+            landmarkName = "scoreWithConfig(candles:config:)"
+            landmarkType = "7">
+            <Locations>
+               <Location
+                  uuid = "4CA96431-0729-4FC8-B222-CFC75DD8AFD3 - 17ca006ddb0c287c"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "static BistScreener.SignalScorer.scoreWithConfig(candles: Swift.Array&lt;BistScreener.Candle&gt;, config: BistScreener.StrategyConfig) -&gt; Swift.Optional&lt;BistScreener.TomorrowSignalScore&gt;"
+                  moduleName = "BistScreener.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/sedatpala/Desktop/BistScreener/Models/SignalScorer.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "256"
+                  endingLineNumber = "256">
+               </Location>
+               <Location
+                  uuid = "4CA96431-0729-4FC8-B222-CFC75DD8AFD3 - b1c1198c9e811a23"
+                  shouldBeEnabled = "Yes"
+                  ignoreCount = "0"
+                  continueAfterRunningActions = "No"
+                  symbolName = "closure #4 () -&gt; Swift.Double in static BistScreener.SignalScorer.scoreWithConfig(candles: Swift.Array&lt;BistScreener.Candle&gt;, config: BistScreener.StrategyConfig) -&gt; Swift.Optional&lt;BistScreener.TomorrowSignalScore&gt;"
+                  moduleName = "BistScreener.debug.dylib"
+                  usesParentBreakpointCondition = "Yes"
+                  urlString = "file:///Users/sedatpala/Desktop/BistScreener/Models/SignalScorer.swift"
+                  startingColumnNumber = "9223372036854775807"
+                  endingColumnNumber = "9223372036854775807"
+                  startingLineNumber = "256"
+                  endingLineNumber = "256">
+               </Location>
+            </Locations>
+         </BreakpointContent>
+      </BreakpointProxy>
+   </Breakpoints>
 </Bucket>

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		287999D5C846E9CB528C7E03 /* BacktestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FFE448784C1F55FE05A8BD6 /* BacktestView.swift */; };
+		291CC47D0116DDA05EBC56B3 /* BacktestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B727F8018446328BD057EEE /* BacktestEngine.swift */; };
 		E90A24EE2F48C67D00772323 /* ScanScoringInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E1758E2F48C0500025EA76 /* ScanScoringInfoView.swift */; };
 		E90A24F42F48C84400772323 /* ScanResult+ScoringBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90A24F32F48C84300772323 /* ScanResult+ScoringBreakdown.swift */; };
 		E922C0782F4C210E000BA4B1 /* SignalBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = E922C0772F4C2103000BA4B1 /* SignalBreakdown.swift */; };
@@ -51,6 +53,7 @@
 		E9B036ED2F4A63D40055DEE9 /* SignalScorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B036EC2F4A63D20055DEE9 /* SignalScorer.swift */; };
 		E9B036EF2F4A884C0055DEE9 /* TradeSignal.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B036EE2F4A883F0055DEE9 /* TradeSignal.swift */; };
 		E9B036F12F4A88CE0055DEE9 /* ScanScoringConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B036F02F4A88C20055DEE9 /* ScanScoringConfig.swift */; };
+		E9BEFE8C2F4C36DF00E9B857 /* StrategyConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9BEFE8B2F4C36DC00E9B857 /* StrategyConfig.swift */; };
 		E9C2B2AB2F48E7D400472A25 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C2B2AA2F48E7D100472A25 /* AppServices.swift */; };
 		E9C3A71F2F49E109003E0096 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9C3A71E2F49E106003E0096 /* ProfileView.swift */; };
 		E9D4834A2F48EA350007FF51 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D483492F48EA330007FF51 /* AsyncSemaphore.swift */; };
@@ -58,6 +61,7 @@
 		E9D4834E2F48EC180007FF51 /* ScanSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9D4834D2F48EC160007FF51 /* ScanSnapshotStore.swift */; };
 		E9E175A52F48C3480025EA76 /* CandlePattern+Signal.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E175A42F48C3460025EA76 /* CandlePattern+Signal.swift */; };
 		E9F223222F48F5340013B854 /* ScanFilterSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9F223212F48F5310013B854 /* ScanFilterSheet.swift */; };
+		E9FDA0EC2F4C33FF00D9478C /* StrategyConfigEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9FDA0EB2F4C33FD00D9478C /* StrategyConfigEditorView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +82,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0B727F8018446328BD057EEE /* BacktestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestEngine.swift; sourceTree = "<group>"; };
+		9FFE448784C1F55FE05A8BD6 /* BacktestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestView.swift; sourceTree = "<group>"; };
 		E90A24F32F48C84300772323 /* ScanResult+ScoringBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanResult+ScoringBreakdown.swift"; sourceTree = "<group>"; };
 		E922C0772F4C2103000BA4B1 /* SignalBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBreakdown.swift; sourceTree = "<group>"; };
 		E946B05A2F45310900F43C5B /* BistScreener.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BistScreener.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -124,6 +130,7 @@
 		E9B036EC2F4A63D20055DEE9 /* SignalScorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalScorer.swift; sourceTree = "<group>"; };
 		E9B036EE2F4A883F0055DEE9 /* TradeSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradeSignal.swift; sourceTree = "<group>"; };
 		E9B036F02F4A88C20055DEE9 /* ScanScoringConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanScoringConfig.swift; sourceTree = "<group>"; };
+		E9BEFE8B2F4C36DC00E9B857 /* StrategyConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyConfig.swift; sourceTree = "<group>"; };
 		E9C2B2AA2F48E7D100472A25 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppServices.swift; sourceTree = "<group>"; };
 		E9C3A71E2F49E106003E0096 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
 		E9D483492F48EA330007FF51 /* AsyncSemaphore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphore.swift; sourceTree = "<group>"; };
@@ -132,6 +139,7 @@
 		E9E1758E2F48C0500025EA76 /* ScanScoringInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanScoringInfoView.swift; sourceTree = "<group>"; };
 		E9E175A42F48C3460025EA76 /* CandlePattern+Signal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CandlePattern+Signal.swift"; sourceTree = "<group>"; };
 		E9F223212F48F5310013B854 /* ScanFilterSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFilterSheet.swift; sourceTree = "<group>"; };
+		E9FDA0EB2F4C33FD00D9478C /* StrategyConfigEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyConfigEditorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -206,6 +214,7 @@
 				E98E78432F4C000100A14DCF /* MarketRegimeDetector.swift */,
 				E9B036F02F4A88C20055DEE9 /* ScanScoringConfig.swift */,
 				E9B036EC2F4A63D20055DEE9 /* SignalScorer.swift */,
+				0B727F8018446328BD057EEE /* BacktestEngine.swift */,
 				E960AE132F492CBC003E63A0 /* ScannerConfig.swift */,
 				E946B1682F467F7700F43C5B /* CandlePattern+Direction.swift */,
 				E9E175A42F48C3460025EA76 /* CandlePattern+Signal.swift */,
@@ -260,6 +269,8 @@
 		E907A1EC2F48E2D800337091 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				E9BEFE8B2F4C36DC00E9B857 /* StrategyConfig.swift */,
+				E9FDA0EB2F4C33FD00D9478C /* StrategyConfigEditorView.swift */,
 				E9C3A71E2F49E106003E0096 /* ProfileView.swift */,
 				E960AE182F4931F0003E63A0 /* Components */,
 				E960AE112F49264E003E63A0 /* SettingsView.swift */,
@@ -272,6 +283,7 @@
 				E946B13A2F45C0AF00F43C5B /* FavoritesView.swift */,
 				E946B1662F4649B300F43C5B /* FormationsView.swift */,
 				E946B1462F45D5DB00F43C5B /* ScanView.swift */,
+				9FFE448784C1F55FE05A8BD6 /* BacktestView.swift */,
 				E946B13C2F45C75200F43C5B /* HomeView.swift */,
 			);
 			path = Views;
@@ -467,12 +479,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E9BEFE8C2F4C36DF00E9B857 /* StrategyConfig.swift in Sources */,
 				E90A24EE2F48C67D00772323 /* ScanScoringInfoView.swift in Sources */,
 				E946B1432F45C90000F43C5B /* ScanStatsStore.swift in Sources */,
 				E9D4834E2F48EC180007FF51 /* ScanSnapshotStore.swift in Sources */,
 				E9B036ED2F4A63D40055DEE9 /* SignalScorer.swift in Sources */,
 				E9C2B2AB2F48E7D400472A25 /* AppServices.swift in Sources */,
 				E946B1472F45D5DE00F43C5B /* ScanView.swift in Sources */,
+				291CC47D0116DDA05EBC56B3 /* BacktestEngine.swift in Sources */,
+				287999D5C846E9CB528C7E03 /* BacktestView.swift in Sources */,
 				E946B1252F45AE6700F43C5B /* StockDetailView.swift in Sources */,
 				E9D4834A2F48EA350007FF51 /* AsyncSemaphore.swift in Sources */,
 				E960ADEE2F48FCB5003E63A0 /* HomeDashboardViewModel.swift in Sources */,
@@ -491,6 +506,7 @@
 				E946B1592F45ED9B00F43C5B /* PortfolioStore.swift in Sources */,
 				E9B036E32F4A2E700055DEE9 /* StockDetailRoute.swift in Sources */,
 				E946B1552F45EB8A00F43C5B /* YahooFinanceService+Cache.swift in Sources */,
+				E9FDA0EC2F4C33FF00D9478C /* StrategyConfigEditorView.swift in Sources */,
 				E946B1672F4649B600F43C5B /* FormationsView.swift in Sources */,
 				E946B1212F45AE4900F43C5B /* WatchlistStore.swift in Sources */,
 				E960AE102F492642003E63A0 /* SettingsStore.swift in Sources */,

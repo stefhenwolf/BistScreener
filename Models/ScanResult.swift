@@ -109,22 +109,22 @@ struct ScanResult: Identifiable, Codable, Hashable {
         }
     }
 
-    /// Scan row alt satır meta (Tier • CLV • Value x • Breakout)
+    /// Scan row alt satır meta (Pre-Breakout bilgileri)
     var uiMetaLine: String? {
         guard let bd = tomorrowBreakdown else { return nil }
         let tier = uiTierText ?? ""
+        let prox = bd.proximityPct > 0
+            ? String(format: "Proximity %+.1f%%", (bd.proximityPct - 1.0) * 100)
+            : ""
+        let volT = bd.volumeTrend > 0
+            ? String(format: "Vol x%.1f", bd.volumeTrend)
+            : ""
+        let comp = bd.rangeCompression > 0
+            ? String(format: "Range %.2f", bd.rangeCompression)
+            : ""
         let clv = String(format: "CLV %.2f", bd.clv)
-        let vx  = String(format: "Value x%.2f", bd.valueMultiple)
 
-        // breakout text (tier’e göre close/ high)
-        let btxt: String
-        if let t = tomorrowTier, t == .c {
-            btxt = "Breakout \(bd.lookback)d High"
-        } else {
-            btxt = "Breakout \(bd.lookback)d Close"
-        }
-
-        let parts = [tier, clv, vx, btxt].filter { !$0.isEmpty }
+        let parts = [tier, prox, volT, comp, clv].filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " • ")
     }
 
