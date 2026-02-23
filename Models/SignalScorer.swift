@@ -18,9 +18,9 @@ enum TomorrowPreset: String, Codable, CaseIterable {
     /// BUY minimum total threshold
     var minBuyTotal: Int {
         switch self {
-        case .relaxed: return 45  // Çok gevşek (test için)
-        case .normal:  return 55  // Normal
-        case .strict:  return 65  // Strict
+        case .relaxed: return 30  // Gevşek – daha fazla aday gösterir
+        case .normal:  return 50  // Dengeli
+        case .strict:  return 65  // Sıkı – yalnızca en güçlü sinyaller
         }
     }
 
@@ -169,8 +169,12 @@ enum SignalScorer {
         }
 
         // ---------- Breakout (tier-based)
-        let highestClose = BreakoutLevels.highestClose(closes: closes, lookback: lookback) ?? 0
-        let highestHigh  = BreakoutLevels.highestHigh(highs: highs, lookback: lookback) ?? 0
+        // ⚠️ Son mumu hariç tut – aksi halde highestClose her zaman >= lastClose olur
+        //   ve `lastClose > level * (1+buffer)` asla true olamaz.
+        let closesExToday = Array(closes.dropLast())
+        let highsExToday  = Array(highs.dropLast())
+        let highestClose = BreakoutLevels.highestClose(closes: closesExToday, lookback: lookback) ?? 0
+        let highestHigh  = BreakoutLevels.highestHigh(highs: highsExToday, lookback: lookback) ?? 0
         let bufferPct: Double = preset == .relaxed ? 0 : (tier == .c ? 0.006 : 0.003)
         let level = tier == .c ? highestHigh : highestClose
         let didBreakout = last.close > (level * (1 + bufferPct))
@@ -179,11 +183,9 @@ enum SignalScorer {
             guard didBreakout else { return nil }
         }
 
-        // ---------- Compression (last 8 bars) - skip for relaxed preset
-        let compression: (ok: Bool, flagsHit: Int) = {
-            if preset == .relaxed { return (true, 0) }  // Skip compression for relaxed
-            return compressionOK(candles: candles, window: 8, preset: preset)
-        }()
+        // ---------- Compression (last 8 bars)
+        // Relaxed: gate atlanır ama skor hâlâ hesaplanır (puanlama için gerekli)
+        let compression = compressionOK(candles: candles, window: 8, preset: preset)
         if preset != .relaxed { guard compression.ok else { return nil } }
 
         // ---------- Expansion (TR spike)

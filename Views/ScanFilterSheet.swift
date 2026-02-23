@@ -145,11 +145,11 @@ struct ScanFilterSheet: View {
     private func presetRulesLine(_ p: TomorrowPreset) -> String {
         switch p {
         case .relaxed:
-            return "Min BUY: 58 • Tier C açık"
+            return "Min BUY: \(p.minBuyTotal) • Tier C açık"
         case .normal:
-            return "Min BUY: 62 • Tier C açık"
+            return "Min BUY: \(p.minBuyTotal) • Tier C açık"
         case .strict:
-            return "Min BUY: 70 • Tier C kapalı"
+            return "Min BUY: \(p.minBuyTotal) • Tier C kapalı"
         }
     }
 }
