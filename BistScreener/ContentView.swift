@@ -13,10 +13,12 @@ struct ContentView: View {
 
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var settings: SettingsStore
+    @StateObject private var backtestEngine: BacktestEngine
 
     @MainActor
     init(services: AppServices, settings: SettingsStore) {
         self.services = services
+        _backtestEngine = StateObject(wrappedValue: BacktestEngine(services: services))
 
         let initialConfig = ScannerConfig(from: settings)
         _appliedConfig = State(initialValue: initialConfig)
@@ -75,7 +77,7 @@ struct ContentView: View {
             .tvNavStyle()
 
             NavigationStack {
-                ScanView(vm: scannerHolder.vm)
+                ScanView(vm: scannerHolder.vm, engine: backtestEngine)
                     .settingsButton(show: $showSettingsSheet)
             }
             .tabItem { Label("Tarama", systemImage: "magnifyingglass") }

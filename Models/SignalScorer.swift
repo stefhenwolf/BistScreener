@@ -62,7 +62,7 @@ struct TomorrowBreakdown: Codable, Equatable, Hashable {
     // Close strength
     var clv: Double = 0
 
-    // Breakout
+    // Breakout proximity
     var lookback: Int = 20
     var highestClose: Double = 0
     var highestHigh: Double = 0
@@ -83,13 +83,43 @@ struct TomorrowBreakdown: Codable, Equatable, Hashable {
     var compressionOK: Bool = false
     var compressionFlagsHit: Int = 0   // 0..3
 
+    // Pre-breakout specific
+    var proximityPct: Double = 0       // How close to breakout level (0..1)
+    var volumeTrend: Double = 0        // Volume trend (recent vs older)
+    var rangeCompression: Double = 0   // Range compression ratio
+
     // For debugging / UI
     var notes: [String] = []
 }
 
-// MARK: - Tomorrow BUY-only Scorer
+// MARK: - Tomorrow BUY-only Scorer (PRE-BREAKOUT Strategy)
 
 enum SignalScorer {
+
+    enum Reject: String {
+        case notEnoughData
+        case todayChangeTooHigh
+        case proximityOutOfRange
+        case valueMultipleLow
+        case volumeTrendLow
+        case clvLow
+        case rangeNotCompressed
+        case scoreBelowMin
+        case refLevelInvalid
+    }
+
+    static func debugScoreWithConfig(candles: [Candle], config: StrategyConfig) -> (result: TomorrowSignalScore?, reject: Reject?, notes: [String]) {
+        var notes: [String] = []
+
+        guard candles.count >= max(config.lookbackDays + 15, 60) else {
+            return (nil, .notEnoughData, ["count=\(candles.count)"])
+        }
+
+        let r = scoreWithConfig(candles: candles, config: config)
+        if r != nil { return (r, nil, ["OK"]) }
+
+        return (nil, .scoreBelowMin, ["returned nil"])
+    }
 
     // MARK: - Tier thresholds (AvgValue20 in TL)
 
@@ -97,142 +127,173 @@ enum SignalScorer {
     private static let tierB: Double = 15_000_000
     private static let tierC: Double = 5_000_000
 
-    // MARK: - Core entry
+    // MARK: - Core entry (preset-based, backwards compatible)
 
-    /// BUY-only: BUY değilse nil döner.
     static func scoreTomorrowBuyOnly(
         candles: [Candle],
         preset: TomorrowPreset,
         lookback: Int = 20
     ) -> TomorrowSignalScore? {
+        // Preset → StrategyConfig dönüşümü
+        var cfg = StrategyConfig.load()
+        cfg.lookbackDays = lookback
+        switch preset {
+        case .relaxed:
+            cfg.minProximity = 0.92
+            cfg.maxProximity = 1.005
+            cfg.minValueMultiple = 0.6
+            cfg.maxRangeCompression = 1.5
+            cfg.maxTodayChangePct = 5.0
+            cfg.minCLV = 0.30
+            cfg.minScore = preset.minBuyTotal
+        case .normal:
+            break // cfg'den oku (kullanıcı ayarları)
+        case .strict:
+            cfg.minProximity = 0.97
+            cfg.maxProximity = 0.995
+            cfg.minValueMultiple = 1.0
+            cfg.maxRangeCompression = 1.0
+            cfg.maxTodayChangePct = 2.0
+            cfg.minCLV = 0.65
+            cfg.minScore = preset.minBuyTotal
+        }
+        return scoreWithConfig(candles: candles, config: cfg)
+    }
 
-        guard candles.count >= max(lookback + 5, 55) else { return nil } // EMA50 vs için güvenli buffer
+    // MARK: - Core entry (config-based)
+
+    /// PRE-BREAKOUT: StrategyConfig ile çalışan ana fonksiyon
+    static func scoreWithConfig(
+        candles: [Candle],
+        config: StrategyConfig
+    ) -> TomorrowSignalScore? {
+
+        let lookback = config.lookbackDays
+        guard candles.count >= max(lookback + 5, 55) else { return nil }
         guard let last = candles.last else { return nil }
 
         let closes = candles.map(\.close)
         let highs  = candles.map(\.high)
-        let lows   = candles.map(\.low)
         let volumes = candles.map { Double($0.volume) }
 
         // ---------- Liquidity (AvgValue20)
         guard let avgValue20 = ValueSeries.averageValue(closes: closes, volumes: volumes, period: 20) else { return nil }
         var tier = liquidityTier(avgValue20: avgValue20)
+        if tier == .none { tier = .b }
 
-        // Skip liquidity check for relaxed mode
-        if preset != .relaxed {
-            if tier == .none { return nil }
-            if tier == .c, preset.allowsTierC == false { return nil }
-        }
-
-        // For relaxed, default to .b if no tier found
-        if tier == .none && preset == .relaxed { tier = .b }
-
-        // ---------- Value spike (today / avg20)
+        // ---------- Value (today / avg20)
         let valueToday = last.close * Double(last.volume)
         let valueMultiple = (avgValue20 > 0) ? (valueToday / avgValue20) : 0
+        guard valueMultiple >= config.minValueMultiple else { return nil }
 
-        // Tier-based value multiple thresholds (relaxed)
-        let minValueMultiple: Double = {
-            if preset == .relaxed { return 1.0 }  // Any volume is OK for relaxed
-            switch tier {
-            case .a: return 1.2
-            case .b: return 1.4
-            case .c: return 1.8
-            case .none: return .infinity
-            }
-        }()
-
-        guard valueMultiple >= minValueMultiple else { return nil }
-
-        // ---------- CLV (close location value)
+        // ---------- CLV
         guard let clv = CLV.value(candle: last) else { return nil }
-
-        // Skip CLV check for relaxed mode
-        if preset != .relaxed {
-            let minCLV: Double = {
-                switch tier {
-                case .a, .b: return 0.75
-                case .c:     return 0.82
-                case .none:  return 1.0
-                }
-            }()
-            guard clv >= minCLV else { return nil }
-        }
+        guard clv >= config.minCLV else { return nil }
 
         // ---------- Trend filter (EMA)
         let ema20 = EMA.lastValue(values: closes, period: 20) ?? 0
         let ema50 = EMA.lastValue(values: closes, period: 50) ?? 0
-        let trendOK = (tier == .c) ? (last.close >= ema50) : (last.close >= ema20)
+        let trendOK = last.close >= ema50
 
-        if preset != .relaxed {
-            guard trendOK else { return nil }
-        }
-
-        // ---------- Breakout (tier-based)
-        // ⚠️ Son mumu hariç tut – aksi halde highestClose her zaman >= lastClose olur
-        //   ve `lastClose > level * (1+buffer)` asla true olamaz.
+        // ---------- Proximity (son mum hariç tutularak hesaplanır)
         let closesExToday = Array(closes.dropLast())
         let highsExToday  = Array(highs.dropLast())
-        let highestClose = BreakoutLevels.highestClose(closes: closesExToday, lookback: lookback) ?? 0
-        let highestHigh  = BreakoutLevels.highestHigh(highs: highsExToday, lookback: lookback) ?? 0
-        let bufferPct: Double = preset == .relaxed ? 0 : (tier == .c ? 0.006 : 0.003)
-        let level = tier == .c ? highestHigh : highestClose
-        let didBreakout = last.close > (level * (1 + bufferPct))
+        let highestClose20 = BreakoutLevels.highestClose(closes: closesExToday, lookback: lookback) ?? 0
+        let highestHigh20  = BreakoutLevels.highestHigh(highs: highsExToday, lookback: lookback) ?? 0
+        let refLevel = tier == .c ? highestHigh20 : highestClose20
+        guard refLevel > 0 else { return nil }
 
-        if preset != .relaxed {
-            guard didBreakout else { return nil }
+        let proximity = last.close / refLevel
+        guard proximity >= config.minProximity else { return nil }
+        guard proximity <= config.maxProximity else { return nil }
+
+        let didBreakout = proximity > 1.0
+
+        // ---------- Volume Trend
+        let recentVols = Array(volumes.suffix(5))
+        let olderVols  = Array(volumes.dropLast(5).suffix(10))
+        let avgRecentVol = recentVols.isEmpty ? 0 : recentVols.reduce(0, +) / Double(recentVols.count)
+        let avgOlderVol  = olderVols.isEmpty ? 1 : olderVols.reduce(0, +) / Double(olderVols.count)
+        let volumeTrend = avgOlderVol > 0 ? (avgRecentVol / avgOlderVol) : 1.0
+
+        if config.minVolumeTrend > 0 {
+            guard volumeTrend >= config.minVolumeTrend else { return nil }
         }
 
-        // ---------- Compression (last 8 bars)
-        // Relaxed: gate atlanır ama skor hâlâ hesaplanır (puanlama için gerekli)
-        let compression = compressionOK(candles: candles, window: 8, preset: preset)
-        if preset != .relaxed { guard compression.ok else { return nil } }
+        // ---------- Range Compression
+        let recentRanges = candles.suffix(5).map { $0.high - $0.low }
+        let olderRanges  = candles.dropLast(5).suffix(10).map { $0.high - $0.low }
+        let avgRecentRange = recentRanges.isEmpty ? 0 : recentRanges.reduce(0, +) / Double(recentRanges.count)
+        let avgOlderRange  = olderRanges.isEmpty ? 1 : olderRanges.reduce(0, +) / Double(olderRanges.count)
+        let rangeCompression = avgOlderRange > 0 ? (avgRecentRange / avgOlderRange) : 1.0
 
-        // ---------- Expansion (TR spike)
+        guard rangeCompression <= config.maxRangeCompression else { return nil }
+
+        // ---------- Today Change
+        let prevClose = candles.count >= 2 ? candles[candles.count - 2].close : last.close
+        let todayChangePct = prevClose > 0 ? ((last.close - prevClose) / prevClose) * 100 : 0
+        guard todayChangePct <= config.maxTodayChangePct else { return nil }
+
+        // ---------- TR spike
         let trSeries = TrueRange.calculate(candles: candles)
-        guard let trToday = trSeries.last else { return nil }
-        guard let trMedian20 = Rolling.medianLast(trSeries, window: 20) else { return nil }
-        guard trMedian20 > 0 else { return nil }
+        let trToday = trSeries.last ?? 0
+        let trMedian20 = Rolling.medianLast(trSeries, window: 20) ?? 1
+        let trSpikeMultiple = trMedian20 > 0 ? (trToday / trMedian20) : 1.0
 
-        let trSpikeMultiple = trToday / trMedian20
-        let minTRSpike: Double = {
-            switch tier {
-            case .a, .b: return preset == .relaxed ? 1.0 : 1.15
-            case .c:     return preset == .relaxed ? 1.1 : 1.5
-            case .none:  return .infinity
-            }
+        // ---------- Compression check
+        let compression = compressionOK(candles: candles, window: 8)
+
+        // ✅ SCORE BUILD (configurable weights)
+        let proximityScore: Double = {
+            let halfRange = (config.maxProximity - config.minProximity)
+            if halfRange <= 0 { return proximity >= config.minProximity ? 1.0 : 0 }
+            // maxProximity'ye yakın = yüksek skor
+            let dist = abs(proximity - config.maxProximity) / halfRange
+            return min(1, max(0, 1.0 - dist))
         }()
-        guard trSpikeMultiple >= minTRSpike else { return nil }
 
-        // ✅ burada artık BUY olmuş sayılır
+        let clvScore = scoreCLV(clv, minCLV: config.minCLV)
 
-        // ---------- Score build (0..100)
-        let breakoutScore = scoreBreakout(lastClose: last.close, level: (tier == .c ? highestHigh : highestClose))
-        let clvScore      = scoreCLV(clv)
-        let valueScore    = scoreMultiple(valueMultiple, cap: 3.0)
-        let compScore     = scoreCompression(flagsHit: compression.flagsHit) // 0..3
+        let volumeTrendScore: Double = {
+            if volumeTrend <= 0.8 { return 0 }
+            let x = (volumeTrend - 0.8) / 1.2
+            return min(1, max(0, x))
+        }()
 
-        // Weights: Breakout 30, CLV 25, Value 25, Compression 20
+        let compressionScore: Double = {
+            if rangeCompression >= config.maxRangeCompression { return 0 }
+            let x = (config.maxRangeCompression - rangeCompression) / max(config.maxRangeCompression - 0.5, 0.1)
+            return min(1, max(0, x))
+        }()
+
+        // Ağırlıkları normalize et (toplam 100'e oranla)
+        let wTotal = config.weightProximity + config.weightVolumeTrend + config.weightCLV + config.weightCompression
+        let normalizer = wTotal > 0 ? (100.0 / wTotal) : 1.0
+
+        // ⚠️ Skor hesaplaması: her bileşen 0..1, ağırlıklar toplamı ~100
+        // Formül: (score_i * weight_i) toplamı * normalizer → 0..100
         let total = min(100, max(0,
             Int(round(
-                breakoutScore * 30 +
-                clvScore      * 25 +
-                valueScore    * 25 +
-                compScore     * 20
+                (proximityScore    * config.weightProximity +
+                 volumeTrendScore  * config.weightVolumeTrend +
+                 clvScore          * config.weightCLV +
+                 compressionScore  * config.weightCompression) * normalizer
             ))
         ))
 
-        // BUY threshold (preset)
-        guard total >= preset.minBuyTotal else { return nil }
+        guard total >= config.minScore else { return nil }
 
-        let quality = qualityBand(total: total)
+        let quality = qualityBand(total: total, config: config)
 
         // Reasons (max 3)
         var reasons: [String] = []
-        reasons.append("Breakout")
-        if clv >= 0.85 { reasons.append("High CLV") }
-        reasons.append(valueMultiple >= 2.0 ? "Value Spike" : "Value Up")
-        if reasons.count > 3 { reasons = Array(reasons.prefix(3)) }
+        if proximityScore >= 0.7 { reasons.append("Kırılım Yakın") }
+        if volumeTrendScore >= 0.5 { reasons.append("Hacim Artışı") }
+        if compressionScore >= 0.5 { reasons.append("Sıkışma") }
+        if clvScore >= 0.7 { reasons.append("Güçlü Kapanış") }
+        if trendOK { reasons.append("Trend Yukarı") }
+        reasons = Array(reasons.prefix(3))
+        if reasons.isEmpty { reasons.append("Pre-Breakout") }
 
         var bd = TomorrowBreakdown()
         bd.avgValue20 = avgValue20
@@ -242,9 +303,9 @@ enum SignalScorer {
         bd.clv = clv
 
         bd.lookback = lookback
-        bd.highestClose = highestClose
-        bd.highestHigh = highestHigh
-        bd.breakoutBufferPct = bufferPct
+        bd.highestClose = highestClose20
+        bd.highestHigh = highestHigh20
+        bd.breakoutBufferPct = 0
         bd.didBreakout = didBreakout
 
         bd.ema20 = ema20
@@ -254,17 +315,21 @@ enum SignalScorer {
         bd.trToday = trToday
         bd.trMedian20 = trMedian20
         bd.trSpikeMultiple = trSpikeMultiple
-        bd.expansionOK = true
+        bd.expansionOK = false
 
-        bd.compressionOK = true
+        bd.compressionOK = compression.ok
         bd.compressionFlagsHit = compression.flagsHit
 
-        // küçük notlar (debug için)
+        bd.proximityPct = proximity
+        bd.volumeTrend = volumeTrend
+        bd.rangeCompression = rangeCompression
+
         bd.notes = [
             "\(tier.label)",
-            String(format: "CLV %.2f", clv),
-            String(format: "Value x%.2f", valueMultiple),
-            String(format: "TR x%.2f", trSpikeMultiple)
+            String(format: "Kırılıma %.1f%%", (proximity - 1.0) * 100),
+            String(format: "Hacim x%.1f", volumeTrend),
+            String(format: "Sıkışma %.2f", rangeCompression),
+            String(format: "Bugün %+.1f%%", todayChangePct)
         ]
 
         return TomorrowSignalScore(
@@ -287,42 +352,22 @@ enum SignalScorer {
         return .none
     }
 
-    private static func qualityBand(total: Int) -> String {
+    private static func qualityBand(total: Int, config: StrategyConfig) -> String {
         switch total {
-        case 90...: return "A+"
-        case 82...: return "A"
-        case 74...: return "B"
-        case 66...: return "C"
-        default:    return "D"
+        case config.qualityAPlus...: return "A+"
+        case config.qualityA...:     return "A"
+        case config.qualityB...:     return "B"
+        case config.qualityC...:     return "C"
+        default:                     return "D"
         }
     }
 
     /// Normalize 0..1 score
-    private static func scoreCLV(_ clv: Double) -> Double {
-        // 0.70 -> 0, 1.0 -> 1
-        let x = (clv - 0.70) / 0.30
+    private static func scoreCLV(_ clv: Double, minCLV: Double) -> Double {
+        if clv <= minCLV { return 0 }
+        let denom = max(1e-9, 1.0 - minCLV)
+        let x = (clv - minCLV) / denom
         return min(1, max(0, x))
-    }
-
-    /// Multiple normalize 0..1
-    private static func scoreMultiple(_ m: Double, cap: Double) -> Double {
-        // 1.0 -> 0, cap -> 1
-        let x = (m - 1.0) / (cap - 1.0)
-        return min(1, max(0, x))
-    }
-
-    /// Breakout “strength”: close/level ratio
-    private static func scoreBreakout(lastClose: Double, level: Double) -> Double {
-        guard level > 0 else { return 0 }
-        let pct = (lastClose / level) - 1.0  // 0.0..?
-        // 0% -> 0, 3% -> 1
-        let x = pct / 0.03
-        return min(1, max(0, x))
-    }
-
-    private static func scoreCompression(flagsHit: Int) -> Double {
-        // 0..3 -> 0..1
-        return min(1, max(0, Double(flagsHit) / 3.0))
     }
 
     private static func compressionOK(candles: [Candle], window: Int, preset: TomorrowPreset = .normal) -> (ok: Bool, flagsHit: Int) {
@@ -352,7 +397,6 @@ enum SignalScorer {
 
         let flags = [flagATRDown, flagRangeDown, flagBodySmall].filter { $0 }.count
 
-        // Require fewer flags for relaxed preset
         let minFlags = preset == .relaxed ? 1 : 2
         return (flags >= minFlags, flags)
     }

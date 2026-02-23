@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ScanView: View {
     @ObservedObject var vm: ScannerViewModel
+    @ObservedObject var engine: BacktestEngine
 
     // UI
     @State private var sort: SortMode = .scoreDesc
@@ -75,6 +76,15 @@ struct ScanView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 14) {
+
+                    NavigationLink {
+                        BacktestView(engine: engine)
+                    } label: {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(TVTheme.text)
+                    }
+                    .buttonStyle(.plain)
 
                     Button { showFilters = true } label: {
                         Image(systemName: "slider.horizontal.3")
