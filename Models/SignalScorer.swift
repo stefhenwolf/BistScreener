@@ -118,8 +118,14 @@ enum SignalScorer {
         guard let avgValue20 = ValueSeries.averageValue(closes: closes, volumes: volumes, period: 20) else { return nil }
         let tier = liquidityTier(avgValue20: avgValue20)
 
-        if tier == .none { return nil }
-        if tier == .c, preset.allowsTierC == false { return nil }
+        // Skip liquidity check for relaxed mode
+        if preset != .relaxed {
+            if tier == .none { return nil }
+            if tier == .c, preset.allowsTierC == false { return nil }
+        }
+
+        // For relaxed, default to .b if no tier found
+        let tier = tier == .none && preset == .relaxed ? .b : tier
 
         // ---------- Value spike (today / avg20)
         let valueToday = last.close * Double(last.volume)
@@ -127,10 +133,11 @@ enum SignalScorer {
 
         // Tier-based value multiple thresholds (relaxed)
         let minValueMultiple: Double = {
+            if preset == .relaxed { return 1.0 }  // Any volume is OK for relaxed
             switch tier {
-            case .a: return preset == .strict ? 1.5 : 1.2
-            case .b: return preset == .strict ? 1.6 : 1.4
-            case .c: return preset == .relaxed ? 1.5 : 1.8
+            case .a: return 1.2
+            case .b: return 1.4
+            case .c: return 1.8
             case .none: return .infinity
             }
         }()
@@ -139,60 +146,66 @@ enum SignalScorer {
 
         // ---------- CLV (close location value)
         guard let clv = CLV.value(candle: last) else { return nil }
-        let minCLV: Double = {
-            switch tier {
-            case .a, .b: return preset == .relaxed ? 0.70 : 0.75
-            case .c:     return preset == .relaxed ? 0.75 : 0.82
-            case .none:  return 1.0
-            }
-        }()
-        guard clv >= minCLV else { return nil }
+
+        // Skip CLV check for relaxed mode
+        if preset != .relaxed {
+            let minCLV: Double = {
+                switch tier {
+                case .a, .b: return 0.75
+                case .c:     return 0.82
+                case .none:  return 1.0
+                }
+            }()
+            guard clv >= minCLV else { return nil }
+        }
 
         // ---------- Trend filter (EMA)
         let ema20 = EMA.lastValue(values: closes, period: 20) ?? 0
         let ema50 = EMA.lastValue(values: closes, period: 50) ?? 0
 
-        let trendOK: Bool = {
-            switch tier {
-            case .a, .b:
-                return last.close >= ema20
-            case .c:
-                // sığda daha strict
-                return last.close >= ema50
-            case .none:
-                return false
-            }
-        }()
-        guard trendOK else { return nil }
+        // Skip trend check for relaxed mode
+        if preset != .relaxed {
+            let trendOK: Bool = {
+                switch tier {
+                case .a, .b:
+                    return last.close >= ema20
+                case .c:
+                    return last.close >= ema50
+                case .none:
+                    return false
+                }
+            }()
+            guard trendOK else { return nil }
+        }
 
         // ---------- Breakout (tier-based)
         let highestClose = BreakoutLevels.highestClose(closes: closes, lookback: lookback) ?? 0
         let highestHigh  = BreakoutLevels.highestHigh(highs: highs, lookback: lookback) ?? 0
 
-        let bufferPct: Double = {
-            switch tier {
-            case .a, .b:
-                return preset == .relaxed ? 0.0 : 0.003   // %0.3
-            case .c:
-                return preset == .relaxed ? 0.003 : 0.006 // %0.6
-            case .none:
-                return 0
-            }
-        }()
+        // Skip breakout check for relaxed mode
+        if preset != .relaxed {
+            let bufferPct: Double = {
+                switch tier {
+                case .a, .b: return 0.003   // %0.3
+                case .c:     return 0.006   // %0.6
+                case .none:  return 0
+                }
+            }()
 
-        let didBreakout: Bool = {
-            switch tier {
-            case .a, .b:
-                let level = highestClose * (1 + bufferPct)
-                return last.close > level
-            case .c:
-                let level = highestHigh * (1 + bufferPct)
-                return last.close > level
-            case .none:
-                return false
-            }
-        }()
-        guard didBreakout else { return nil }
+            let didBreakout: Bool = {
+                switch tier {
+                case .a, .b:
+                    let level = highestClose * (1 + bufferPct)
+                    return last.close > level
+                case .c:
+                    let level = highestHigh * (1 + bufferPct)
+                    return last.close > level
+                case .none:
+                    return false
+                }
+            }()
+            guard didBreakout else { return nil }
+        }
 
         // ---------- Compression (last 8 bars) - skip for relaxed preset
         let compression: (ok: Bool, flagsHit: Int) = {
