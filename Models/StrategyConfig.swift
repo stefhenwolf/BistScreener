@@ -13,22 +13,22 @@ struct StrategyConfig: Codable, Equatable {
     var maxProximity: Double = 1.005
 
     /// ValueMultiple = todayValue / avg20Value
-    var minValueMultiple: Double = 1.6
+    var minValueMultiple: Double = 0.8
 
     /// VolumeTrend = (avgVol last 5) / (avgVol prev 10)
-    var minVolumeTrend: Double = 1.05
+    var minVolumeTrend: Double = 0.0    // 0 = filtre kapalı (default)
 
     /// CLV = (close-low)/(high-low)
-    var minCLV: Double = 0.78
+    var minCLV: Double = 0.50
 
     /// RangeCompression = recentRange / olderRange (küçük daha sıkışma)
-    var maxRangeCompression: Double = 1.30
+    var maxRangeCompression: Double = 1.50
 
     /// Aşırı yükselmiş günü elemek için (EOD %)
     var maxTodayChangePct: Double = 6.0
 
     /// BUY minimum skor
-    var minScore: Int = 50
+    var minScore: Int = 40
 
     // MARK: - Weights (0..100 scale recommended)
     var weightProximity: Double = 30
@@ -48,27 +48,27 @@ struct StrategyConfig: Codable, Equatable {
 
     static var aggressive: StrategyConfig {
         var c = StrategyConfig()
-        c.minProximity = 0.955
-        c.maxProximity = 1.015
-        c.minValueMultiple = 1.35
-        c.minVolumeTrend = 1.00
-        c.minCLV = 0.72
-        c.maxRangeCompression = 1.45
+        c.minProximity = 0.92
+        c.maxProximity = 1.02
+        c.minValueMultiple = 0.5
+        c.minVolumeTrend = 0.0
+        c.minCLV = 0.30
+        c.maxRangeCompression = 2.0
         c.maxTodayChangePct = 8.0
-        c.minScore = 35
+        c.minScore = 25
         return c
     }
 
     static var conservative: StrategyConfig {
         var c = StrategyConfig()
-        c.minProximity = 0.98
+        c.minProximity = 0.97
         c.maxProximity = 1.002
-        c.minValueMultiple = 1.85
-        c.minVolumeTrend = 1.10
-        c.minCLV = 0.82
-        c.maxRangeCompression = 1.20
-        c.maxTodayChangePct = 5.0
-        c.minScore = 65
+        c.minValueMultiple = 1.0
+        c.minVolumeTrend = 1.05
+        c.minCLV = 0.70
+        c.maxRangeCompression = 1.15
+        c.maxTodayChangePct = 4.0
+        c.minScore = 60
         return c
     }
 

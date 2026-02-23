@@ -139,22 +139,24 @@ enum SignalScorer {
         cfg.lookbackDays = lookback
         switch preset {
         case .relaxed:
-            cfg.minProximity = 0.92
-            cfg.maxProximity = 1.005
-            cfg.minValueMultiple = 0.6
-            cfg.maxRangeCompression = 1.5
-            cfg.maxTodayChangePct = 5.0
-            cfg.minCLV = 0.30
+            cfg.minProximity = 0.90
+            cfg.maxProximity = 1.02
+            cfg.minValueMultiple = 0.5
+            cfg.minVolumeTrend = 0.0       // filtre kapalı
+            cfg.minCLV = 0.20
+            cfg.maxRangeCompression = 2.0
+            cfg.maxTodayChangePct = 8.0
             cfg.minScore = preset.minBuyTotal
         case .normal:
             break // cfg'den oku (kullanıcı ayarları)
         case .strict:
             cfg.minProximity = 0.97
-            cfg.maxProximity = 0.995
-            cfg.minValueMultiple = 1.0
-            cfg.maxRangeCompression = 1.0
-            cfg.maxTodayChangePct = 2.0
-            cfg.minCLV = 0.65
+            cfg.maxProximity = 1.002
+            cfg.minValueMultiple = 1.2
+            cfg.minVolumeTrend = 1.1
+            cfg.minCLV = 0.70
+            cfg.maxRangeCompression = 1.1
+            cfg.maxTodayChangePct = 3.0
             cfg.minScore = preset.minBuyTotal
         }
         return scoreWithConfig(candles: candles, config: cfg)
@@ -245,11 +247,11 @@ enum SignalScorer {
 
         // ✅ SCORE BUILD (configurable weights)
         let proximityScore: Double = {
-            let halfRange = (config.maxProximity - config.minProximity)
-            if halfRange <= 0 { return proximity >= config.minProximity ? 1.0 : 0 }
-            // maxProximity'ye yakın = yüksek skor
-            let dist = abs(proximity - config.maxProximity) / halfRange
-            return min(1, max(0, 1.0 - dist))
+            let range = config.maxProximity - config.minProximity
+            guard range > 0 else { return proximity >= config.minProximity ? 1.0 : 0 }
+            // minProximity → 0, maxProximity → 1 (lineer)
+            let x = (proximity - config.minProximity) / range
+            return min(1, max(0, x))
         }()
 
         let clvScore = scoreCLV(clv, minCLV: config.minCLV)
