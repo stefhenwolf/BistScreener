@@ -165,16 +165,7 @@ enum SignalScorer {
 
         // Skip trend check for relaxed mode
         if preset != .relaxed {
-            let trendOK: Bool = {
-                switch tier {
-                case .a, .b:
-                    return last.close >= ema20
-                case .c:
-                    return last.close >= ema50
-                case .none:
-                    return false
-                }
-            }()
+            let trendOK = (tier == .c) ? (last.close >= ema50) : (last.close >= ema20)
             guard trendOK else { return nil }
         }
 
@@ -184,26 +175,9 @@ enum SignalScorer {
 
         // Skip breakout check for relaxed mode
         if preset != .relaxed {
-            let bufferPct: Double = {
-                switch tier {
-                case .a, .b: return 0.003   // %0.3
-                case .c:     return 0.006   // %0.6
-                case .none:  return 0
-                }
-            }()
-
-            let didBreakout: Bool = {
-                switch tier {
-                case .a, .b:
-                    let level = highestClose * (1 + bufferPct)
-                    return last.close > level
-                case .c:
-                    let level = highestHigh * (1 + bufferPct)
-                    return last.close > level
-                case .none:
-                    return false
-                }
-            }()
+            let bufferPct: Double = preset == .relaxed ? 0 : (tier == .c ? 0.006 : 0.003)
+            let level = tier == .c ? highestHigh : highestClose
+            let didBreakout = last.close > (level * (1 + bufferPct))
             guard didBreakout else { return nil }
         }
 
