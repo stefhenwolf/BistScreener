@@ -116,7 +116,7 @@ enum SignalScorer {
 
         // ---------- Liquidity (AvgValue20)
         guard let avgValue20 = ValueSeries.averageValue(closes: closes, volumes: volumes, period: 20) else { return nil }
-        let tier = liquidityTier(avgValue20: avgValue20)
+        var tier = liquidityTier(avgValue20: avgValue20)
 
         // Skip liquidity check for relaxed mode
         if preset != .relaxed {
@@ -125,7 +125,7 @@ enum SignalScorer {
         }
 
         // For relaxed, default to .b if no tier found
-        let tier = tier == .none && preset == .relaxed ? .b : tier
+        if tier == .none && preset == .relaxed { tier = .b }
 
         // ---------- Value spike (today / avg20)
         let valueToday = last.close * Double(last.volume)
