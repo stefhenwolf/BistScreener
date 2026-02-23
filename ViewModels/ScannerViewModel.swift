@@ -482,7 +482,7 @@ final class ScannerViewModel: ObservableObject {
 
         return try await services.candles.getCandles(
             symbol: sym,
-            range: .mo3,  // 6mo -> 3mo (hızlı)
+            range: .mo6,  // 6 months (hızlı - cache varsa)
             minCount: 80,  // 160 -> 80 (yeterli)
             forceRefresh: false
         )
