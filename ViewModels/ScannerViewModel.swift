@@ -58,15 +58,15 @@ final class ScannerViewModel: ObservableObject {
 
     private let baseConcurrencyLimit: Int
 
-    private let throttleAll  = AsyncThrottle(minInterval: 0.25)
-    private let throttle100  = AsyncThrottle(minInterval: 0.18)
-    private let throttle30   = AsyncThrottle(minInterval: 0.15)
+    private let throttleAll  = AsyncThrottle(minInterval: 0.08)  // 0.25 -> 0.08
+    private let throttle100  = AsyncThrottle(minInterval: 0.05)  // 0.18 -> 0.05
+    private let throttle30   = AsyncThrottle(minInterval: 0.03)  // 0.15 -> 0.03
 
     private var concurrencyLimit: Int {
         switch selectedIndex {
-        case .bistAll: return 2
-        case .xu100:   return min(6, baseConcurrencyLimit)
-        case .xu030:   return min(8, baseConcurrencyLimit)
+        case .bistAll: return min(8, baseConcurrencyLimit)  // 2 -> 8
+        case .xu100:   return min(12, baseConcurrencyLimit) // 6 -> 12
+        case .xu030:   return min(16, baseConcurrencyLimit) // 8 -> 16
         }
     }
 
@@ -429,7 +429,7 @@ final class ScannerViewModel: ObservableObject {
             let candles = try await loadCandlesForScan(symbol: symbol)
             guard candles.count >= 80 else { return nil } // EMA50 + güvenli
 
-            let recent = Array(candles.suffix(160))
+            let recent = Array(candles.suffix(80))  // 160 -> 80
             guard recent.count >= 80 else { return nil }
 
             let last = recent[recent.count - 1]
@@ -437,7 +437,7 @@ final class ScannerViewModel: ObservableObject {
             let changePct = ((last.close - prev.close) / max(prev.close, 0.000001)) * 100.0
 
             // patterns istersen UI'da göstermek için kalsın (opsiyonel)
-            let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(120)))
+            let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(60)))  // 120 -> 60
 
             // ✅ Tomorrow BUY-only
             let tomo = SignalScorer.scoreTomorrowBuyOnly(
@@ -470,11 +470,11 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    /// Cache varsa hızlı (>=20). Yoksa 6mo indirir.
+    /// Cache varsa hızlı (>=80). Yoksa 3mo indirir (hızlı scan için).
     private func loadCandlesForScan(symbol: String) async throws -> [Candle] {
         let sym = symbol.normalizedBISTSymbol()
 
-        if let disk = await CandleCache.shared.load(symbol: sym), disk.count >= 20 {
+        if let disk = await CandleCache.shared.load(symbol: sym), disk.count >= 80 {
             return disk
         }
 
@@ -482,8 +482,8 @@ final class ScannerViewModel: ObservableObject {
 
         return try await services.candles.getCandles(
             symbol: sym,
-            range: .mo6,
-            minCount: 160,
+            range: .mo3,  // 6mo -> 3mo (hızlı)
+            minCount: 80,  // 160 -> 80 (yeterli)
             forceRefresh: false
         )
     }
