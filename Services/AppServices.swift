@@ -15,10 +15,14 @@ final class AppServices: ObservableObject {
     let candles: CandleRepository
     let cacheStats = CacheStats()
     let ticker = MarketTickerViewModel()
+    let portfolio: PortfolioViewModel
+    let strategy: LiveStrategyStore
 
     init() {
         self.yahoo = YahooFinanceService()
         self.indexService = BorsaIstanbulIndexService()
         self.candles = CandleRepository(yahoo: yahoo, ttlMinutes: 10)
+        self.portfolio = PortfolioViewModel(yahoo: yahoo)
+        self.strategy = LiveStrategyStore(yahoo: yahoo, indexService: indexService, portfolioVM: portfolio)
     }
 }

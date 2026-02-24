@@ -44,8 +44,15 @@ enum TVAppearance {
         UINavigationBar.appearance().scrollEdgeAppearance = nav
         UINavigationBar.appearance().compactAppearance = nav
         UINavigationBar.appearance().tintColor = UIColor(TVTheme.up)     // back button/icon rengi  
-        
-        
-        
+
+        // --- Table/List arka planı (iOS List beyaz şeritleri engelle) ---
+        UITableView.appearance().backgroundColor = .clear
+        UITableViewCell.appearance().backgroundColor = .clear
+        UITableViewHeaderFooterView.appearance().tintColor = .clear
+
+        // --- Pull-to-refresh indicator ---
+        // Home'da ticker bar altındaki refresh spinner beyaz görünsün.
+        UIRefreshControl.appearance().tintColor = .white
+        UIRefreshControl.appearance().backgroundColor = .clear
     }
 }

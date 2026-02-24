@@ -11,6 +11,14 @@ enum ScanSnapshotStore {
         let url = try fileURL(indexRaw: nil)
         let data = try JSONEncoder().encode(snapshot)
         try data.write(to: url, options: [.atomic])
+        NotificationCenter.default.post(
+            name: .scanSnapshotSaved,
+            object: nil,
+            userInfo: [
+                "indexRaw": snapshot.indexRaw,
+                "savedAt": snapshot.savedAt
+            ]
+        )
     }
 
     static func load() throws -> PersistedScanSnapshot {
@@ -32,6 +40,14 @@ enum ScanSnapshotStore {
         let url = try fileURL(indexRaw: indexRaw)
         let data = try JSONEncoder().encode(snapshot)
         try data.write(to: url, options: [.atomic])
+        NotificationCenter.default.post(
+            name: .scanSnapshotSaved,
+            object: nil,
+            userInfo: [
+                "indexRaw": indexRaw,
+                "savedAt": snapshot.savedAt
+            ]
+        )
     }
 
     static func load(forIndexRaw indexRaw: String) throws -> PersistedScanSnapshot {

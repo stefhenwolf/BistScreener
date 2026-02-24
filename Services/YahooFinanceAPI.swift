@@ -149,16 +149,12 @@ final class YahooFinanceService {
                 }
 
                 if !(200...299).contains(http.statusCode) {
-                    let body = String(data: data.prefix(900), encoding: .utf8) ?? "<non-utf8>"
                     if shouldRetry(status: http.statusCode), attempt < (policy.maxAttempts - 1) {
                         let d = backoffDelay(attempt: attempt, policy: policy, status: http.statusCode)
-                        print("Yahoo HTTP \(http.statusCode) retry in \(String(format: "%.2f", d))s sym=\(sym)")
                         try? await Task.sleep(nanoseconds: UInt64(d * 1_000_000_000))
                         continue
                     }
 
-                    // Debug için
-                    print("Yahoo HTTP \(http.statusCode) sym=\(sym) url=\(url)\n\(body)")
                     throw NSError(
                         domain: "YahooHTTP",
                         code: http.statusCode,
@@ -242,3 +238,5 @@ final class YahooFinanceService {
         return capped + jitter
     }
 }
+
+extension YahooFinanceService: @unchecked Sendable {}

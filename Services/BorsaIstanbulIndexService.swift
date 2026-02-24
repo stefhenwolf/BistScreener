@@ -129,7 +129,6 @@ final class BorsaIstanbulIndexService {
 
         var maxDate: Date = .distantPast
         var bucketByDate: [Date: [String]] = [:]
-        var matchedRowCount = 0
 
         for line in lines {
             // header satırlarını atla
@@ -153,17 +152,8 @@ final class BorsaIstanbulIndexService {
             let base = rawComp.split(separator: ".").first.map(String.init) ?? rawComp
             guard !base.isEmpty else { continue }
 
-            matchedRowCount += 1
-
             if d > maxDate { maxDate = d }
             bucketByDate[d, default: []].append(base)
-        }
-
-        // ✅ Debug
-        if scanAll {
-            print("BIST_ALL matchedRows=\(matchedRowCount) latestDate=\(maxDate)")
-        } else {
-            print("Index \(indexCode) matchedRows=\(matchedRowCount) latestDate=\(maxDate)")
         }
 
         let bases = Array(Set(bucketByDate[maxDate] ?? [])).sorted()
@@ -172,3 +162,5 @@ final class BorsaIstanbulIndexService {
         return Snapshot(indexCode: indexCode, date: maxDate, yahooSymbols: yahoo)
     }
 }
+
+extension BorsaIstanbulIndexService: @unchecked Sendable {}

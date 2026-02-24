@@ -9,7 +9,7 @@ import Foundation
 struct PortfolioRow: Identifiable, Hashable {
     let id: UUID
     let asset: Asset
-    let lastPrice: Double?        // asset’in kendi baz fiyatı (metal için USD/ons)
+    let lastPrice: Double?        // asset'in kendi baz fiyatı (metal için USD/ons)
     let prevClose: Double?        // dünkü kapanış (baz fiyat)
     let valueTRY: Double?         // TRY toplam değer
     let pnlTRY: Double?           // TRY toplam K/Z (avgCostTRY varsa)
@@ -29,14 +29,78 @@ final class PortfolioViewModel: ObservableObject {
     @Published var errorText: String?
 
     private let store = PortfolioStore.shared
-    private let yahoo = YahooFinanceService()
+    private let yahoo: YahooFinanceService
 
-    // MARK: - FX fallback (Frankfurter)
+    // ── USD/TRY cache (5 dk TTL) ──
+    private var cachedUsdTry: Double?
+    private var usdTryFetchedAt: Date?
+    private let usdTryTTL: TimeInterval = 300 // 5 dakika
+
+    // ── Fiyat cache (aynı session içinde tekrar çekmemek için) ──
+    private struct PriceCache {
+        let last: Double?
+        let prev: Double?
+        let fetchedAt: Date
+    }
+    private var priceCache: [String: PriceCache] = [:]
+    private let priceTTL: TimeInterval = 120 // 2 dakika
+    private let maxPriceFetchConcurrency: Int = 8
+
+    init(yahoo: YahooFinanceService = YahooFinanceService()) {
+        self.yahoo = yahoo
+    }
+
+    // MARK: - FX: concurrent Yahoo + Frankfurter
+
+    private func fetchUSDTry() async -> Double? {
+        // Cache kontrolü
+        if let cached = cachedUsdTry,
+           let at = usdTryFetchedAt,
+           Date().timeIntervalSince(at) < usdTryTTL {
+            return cached
+        }
+
+        // Yahoo ve Frankfurter'ı paralel çek, ilk BAŞARILI sonucu al.
+        // Başarılı bir sonuç bulununca diğer görevi iptal et.
+        let result: Double? = await withTaskGroup(of: Double?.self, returning: Double?.self) { group in
+            group.addTask { [yahoo] in
+                do {
+                    let candles = try await yahoo.fetchDailyCandles(symbol: "USDTRY=X", range: "5d")
+                    return candles.last?.close
+                } catch {
+                    return nil
+                }
+            }
+            group.addTask {
+                do {
+                    return try await self.fetchUSDTryFromFrankfurter()
+                } catch {
+                    return nil
+                }
+            }
+
+            var firstSuccess: Double?
+            while let value = await group.next() {
+                if let value {
+                    firstSuccess = value
+                    group.cancelAll()
+                    break
+                }
+            }
+            return firstSuccess
+        }
+
+        if let result {
+            cachedUsdTry = result
+            usdTryFetchedAt = Date()
+        }
+        return result
+    }
 
     private func fetchUSDTryFromFrankfurter() async throws -> Double {
         let url = URL(string: "https://api.frankfurter.app/latest?from=USD&to=TRY")!
         var req = URLRequest(url: url)
-        req.timeoutInterval = 12
+        req.timeoutInterval = 5
         req.setValue("BistScreener/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
 
         let (data, resp) = try await URLSession.shared.data(for: req)
@@ -61,6 +125,8 @@ final class PortfolioViewModel: ObservableObject {
     }
 
     func loadFromDiskAndRefresh() {
+        // Zaten yükleniyor ise tekrar tetikleme
+        guard !isLoading else { return }
         Task { [weak self] in
             guard let self else { return }
             await self.loadFromDisk()
@@ -69,16 +135,43 @@ final class PortfolioViewModel: ObservableObject {
     }
 
     func upsert(_ asset: Asset) {
-        // ✅ önce local state güncelle
-        if let idx = assets.firstIndex(where: { $0.id == asset.id }) {
-            assets[idx] = asset
+        var normalized = asset
+        normalized.symbol = Self.normalizedPortfolioSymbol(type: normalized.type, symbol: normalized.symbol)
+
+        if let idx = assets.firstIndex(where: { $0.id == normalized.id }) {
+            assets[idx] = normalized
         } else {
-            assets.append(asset)
+            // Merge satırından gelen düzenlemelerde id birebir tutmayabilir.
+            let key = Self.normalizedPortfolioSymbol(type: normalized.type, symbol: normalized.symbol)
+            let sameSymbolIndices = assets.indices.filter { i in
+                assets[i].type == normalized.type &&
+                Self.normalizedPortfolioSymbol(type: assets[i].type, symbol: assets[i].symbol) == key
+            }
+
+            if let first = sameSymbolIndices.first {
+                let preserved = assets[first]
+                let updated = Asset(
+                    id: preserved.id,
+                    type: normalized.type,
+                    name: normalized.name,
+                    symbol: normalized.symbol,
+                    quantity: normalized.quantity,
+                    avgCostTRY: normalized.avgCostTRY,
+                    createdAt: preserved.createdAt
+                )
+                assets[first] = updated
+
+                for idx in sameSymbolIndices.dropFirst().sorted(by: >) {
+                    assets.remove(at: idx)
+                }
+            } else {
+                assets.append(normalized)
+            }
         }
 
-        // ✅ store'a yaz
+        let snapshot = assets
         Task { [store] in
-            await store.upsert(asset)
+            await store.save(snapshot)
         }
     }
 
@@ -94,6 +187,7 @@ final class PortfolioViewModel: ObservableObject {
             await store.delete(ids: ids)
         }
     }
+
     func deleteBySymbols(_ symbols: [String]) {
         let keys = Set(symbols.map { $0.uppercased() }.filter { !$0.isEmpty })
         guard !keys.isEmpty else { return }
@@ -107,10 +201,59 @@ final class PortfolioViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
+    func sellAsset(type: AssetType, symbol: String, quantity: Double) -> Bool {
+        let targetQty = max(0, quantity)
+        guard targetQty > 0 else { return false }
+
+        let key = Self.normalizedPortfolioSymbol(type: type, symbol: symbol)
+        guard !key.isEmpty else { return false }
+
+        let available = assets.reduce(0.0) { partial, asset in
+            guard asset.type == type else { return partial }
+            let assetKey = Self.normalizedPortfolioSymbol(type: asset.type, symbol: asset.symbol)
+            guard assetKey == key else { return partial }
+            return partial + max(0, asset.quantity)
+        }
+
+        guard available + 1e-9 >= targetQty else { return false }
+
+        var remaining = targetQty
+        var updated: [Asset] = []
+        updated.reserveCapacity(assets.count)
+
+        for var asset in assets {
+            let assetKey = Self.normalizedPortfolioSymbol(type: asset.type, symbol: asset.symbol)
+            let isMatch = asset.type == type && assetKey == key
+            guard isMatch, remaining > 0 else {
+                updated.append(asset)
+                continue
+            }
+
+            let currentQty = max(0, asset.quantity)
+            let deduct = min(currentQty, remaining)
+            let nextQty = currentQty - deduct
+            remaining -= deduct
+
+            if nextQty > 0.000_000_1 {
+                asset.quantity = nextQty
+                updated.append(asset)
+            }
+        }
+
+        assets = updated
+        let snapshot = assets
+        Task { [store] in
+            await store.save(snapshot)
+        }
+        refreshPrices()
+        return true
+    }
 
     // MARK: - Refresh prices
 
     func refreshPrices() {
+        guard !isLoading else { return }
         Task { [weak self] in
             guard let self else { return }
             await self.refreshPricesAsync()
@@ -132,62 +275,63 @@ final class PortfolioViewModel: ObservableObject {
             return
         }
 
-        // 1) USDTRY: önce Yahoo
-        var usdTry: Double? = nil
-        do {
-            let usdCandles = try await yahoo.fetchDailyCandles(symbol: "USDTRY=X", range: "1mo")
-            usdTry = usdCandles.last?.close
-        } catch {
-            usdTry = nil
-        }
+        // ✅ 2) USD/TRY: concurrent Yahoo + Frankfurter (cached)
+        let usdTry = await fetchUSDTry()
 
-        // 2) Yahoo olmadıysa Frankfurter fallback
-        if usdTry == nil {
-            do { usdTry = try await fetchUSDTryFromFrankfurter() }
-            catch { usdTry = nil }
-        }
-
-        let concurrencyLimit = 8
-        var iterator = list.makeIterator()
-
+        // ✅ 3) Concurrent fiyat çekimi (bounded concurrency + price cache)
         var tmp: [PortfolioRow] = []
         tmp.reserveCapacity(list.count)
 
         await withTaskGroup(of: PortfolioRow?.self) { group in
+            let concurrency = max(1, min(maxPriceFetchConcurrency, list.count))
+            var iterator = list.makeIterator()
 
-            func add(_ a: Asset) {
+            for _ in 0..<concurrency {
+                guard let a = iterator.next() else { break }
                 let usdTrySnap = usdTry
 
-                group.addTask {
-                    let yahoo = YahooFinanceService()
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
 
                     let fetchSymbol: String = {
-                        if a.type == .metal {
+                        switch a.type {
+                        case .metal:
                             return Self.yahooSymbolForMetal(original: a.symbol)
+                        case .stock, .fund:
+                            // BIST hisseleri/fonları ".IS" suffix'i gerektirir
+                            return a.symbol.normalizedBISTSymbol()
+                        case .fx, .crypto:
+                            return a.symbol
                         }
-                        return a.symbol
                     }()
 
-                    do {
-                        // son + prev close için 5d yeterli
-                        let candles = try await yahoo.fetchDailyCandles(symbol: fetchSymbol, range: "5d")
-                        let last = candles.last?.close
-                        let prev = candles.count >= 2 ? candles[candles.count - 2].close : nil
-
-                        return Self.makeRow(asset: a, lastPrice: last, prevClose: prev, usdTry: usdTrySnap)
-                    } catch {
-                        return Self.makeRow(asset: a, lastPrice: nil, prevClose: nil, usdTry: usdTrySnap)
-                    }
+                    let (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    return Self.makeRow(asset: a, lastPrice: last, prevClose: prev, usdTry: usdTrySnap)
                 }
-            }
-
-            for _ in 0..<min(concurrencyLimit, list.count) {
-                if let a = iterator.next() { add(a) }
             }
 
             while let r = await group.next() {
                 if let r { tmp.append(r) }
-                if let next = iterator.next() { add(next) }
+
+                guard let a = iterator.next() else { continue }
+                let usdTrySnap = usdTry
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
+
+                    let fetchSymbol: String = {
+                        switch a.type {
+                        case .metal:
+                            return Self.yahooSymbolForMetal(original: a.symbol)
+                        case .stock, .fund:
+                            return a.symbol.normalizedBISTSymbol()
+                        case .fx, .crypto:
+                            return a.symbol
+                        }
+                    }()
+
+                    let (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    return Self.makeRow(asset: a, lastPrice: last, prevClose: prev, usdTry: usdTrySnap)
+                }
             }
         }
 
@@ -204,6 +348,37 @@ final class PortfolioViewModel: ObservableObject {
         lastUpdated = Date()
     }
 
+    // MARK: - Price fetch (with in-memory TTL cache)
+
+    private func fetchPrice(symbol: String) async -> (last: Double?, prev: Double?) {
+        let key = symbol.uppercased()
+
+        // Cache hit
+        if let cached = priceCache[key],
+           Date().timeIntervalSince(cached.fetchedAt) < priceTTL {
+            return (cached.last, cached.prev)
+        }
+
+        // Network fetch
+        do {
+            let candles = try await yahoo.fetchDailyCandles(symbol: symbol, range: "5d")
+            let last = candles.last?.close
+            let prev = candles.count >= 2 ? candles[candles.count - 2].close : nil
+
+            priceCache[key] = PriceCache(last: last, prev: prev, fetchedAt: Date())
+            return (last, prev)
+        } catch {
+            return (nil, nil)
+        }
+    }
+
+    /// Fiyat cache'ini temizle (manuel yenileme için)
+    func clearPriceCache() {
+        priceCache.removeAll()
+        cachedUsdTry = nil
+        usdTryFetchedAt = nil
+    }
+
     // MARK: - Merge (same symbol+type)
 
     nonisolated private static func mergeAssets(_ assets: [Asset]) -> [Asset] {
@@ -214,7 +389,7 @@ final class PortfolioViewModel: ObservableObject {
 
         var dict: [Key: [Asset]] = [:]
         for a in assets {
-            let key = Key(type: a.type, symbol: a.symbol.uppercased())
+            let key = Key(type: a.type, symbol: normalizedPortfolioSymbol(type: a.type, symbol: a.symbol))
             dict[key, default: []].append(a)
         }
 
@@ -268,8 +443,18 @@ final class PortfolioViewModel: ObservableObject {
         return merged
     }
 
+    nonisolated private static func normalizedPortfolioSymbol(type: AssetType, symbol: String) -> String {
+        let raw = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        switch type {
+        case .stock, .fund:
+            return raw.normalizedBISTSymbol()
+        case .fx, .metal, .crypto:
+            return raw
+        }
+    }
+
     nonisolated private static func stableUUID(_ key: String) -> UUID {
-        // hash stable değil; UTF8’den deterministik 16 byte üretelim
+        // hash stable değil; UTF8'den deterministik 16 byte üretelim
         let bytes = Array(key.utf8)
         var b = [UInt8](repeating: 0, count: 16)
         for i in 0..<16 {
@@ -291,10 +476,6 @@ final class PortfolioViewModel: ObservableObject {
     // MARK: - Row valuation (TRY + Daily PnL)
 
     nonisolated private static func makeRow(asset: Asset, lastPrice: Double?, prevClose: Double?, usdTry: Double?) -> PortfolioRow {
-        let sym = asset.symbol.uppercased()
-        let isBistTRY = sym.hasSuffix(".IS")
-        let isFX = asset.type == .fx
-
         let lp = lastPrice
         let pc = prevClose
 
@@ -308,6 +489,8 @@ final class PortfolioViewModel: ObservableObject {
 
         if let lp {
             switch asset.type {
+
+            // ── Metal: USD/ons → TRY/gram çevrim ──
             case .metal:
                 if let usdTry {
                     let tryPerGramLast = (lp * usdTry) / gramPerOunce
@@ -321,23 +504,33 @@ final class PortfolioViewModel: ObservableObject {
                     }
                 }
 
-            default:
-                if isFX || isBistTRY {
-                    valueTRY = lp * asset.quantity
+            // ── BIST hisse/fon: Yahoo .IS fiyatı zaten TRY ──
+            case .stock, .fund:
+                valueTRY = lp * asset.quantity
+
+                if let pc, pc > 0 {
+                    dayPnlTRY = (lp - pc) * asset.quantity
+                    dayChangePct = ((lp - pc) / pc) * 100.0
+                }
+
+            // ── Döviz (FX): USDTRY=X gibi, fiyat zaten TRY ──
+            case .fx:
+                valueTRY = lp * asset.quantity
+
+                if let pc, pc > 0 {
+                    dayPnlTRY = (lp - pc) * asset.quantity
+                    dayChangePct = ((lp - pc) / pc) * 100.0
+                }
+
+            // ── Kripto: USD bazlı → TRY çevrim ──
+            case .crypto:
+                if let usdTry {
+                    valueTRY = (lp * usdTry) * asset.quantity
+                    usedUSD = true
 
                     if let pc, pc > 0 {
-                        dayPnlTRY = (lp - pc) * asset.quantity
+                        dayPnlTRY = ((lp - pc) * usdTry) * asset.quantity
                         dayChangePct = ((lp - pc) / pc) * 100.0
-                    }
-                } else {
-                    if let usdTry {
-                        valueTRY = (lp * usdTry) * asset.quantity
-                        usedUSD = true
-
-                        if let pc, pc > 0 {
-                            dayPnlTRY = ((lp - pc) * usdTry) * asset.quantity
-                            dayChangePct = ((lp - pc) / pc) * 100.0
-                        }
                     }
                 }
             }

@@ -50,6 +50,11 @@ final class CandleRepository: ObservableObject {
            cached.count >= min(20, minCount),
            let t = lastFetchAt[sym],
            Date().timeIntervalSince(t) < ttl {
+            if needsLatestRefresh(lastDate: cached.last?.date) {
+                if let refreshed = try? await refreshLatestIfNeeded(symbol: sym), !refreshed.isEmpty {
+                    return refreshed
+                }
+            }
             return cached
         }
 
@@ -63,6 +68,11 @@ final class CandleRepository: ObservableObject {
 
             // Eğer disk yeterliyse direkt dön
             if disk.count >= min(20, minCount) {
+                if needsLatestRefresh(lastDate: disk.last?.date) {
+                    if let refreshed = try? await refreshLatestIfNeeded(symbol: sym), !refreshed.isEmpty {
+                        return refreshed
+                    }
+                }
                 return disk
             }
             // yetmiyorsa fetch'e düş
@@ -181,5 +191,16 @@ final class CandleRepository: ObservableObject {
         for c in new { dict[dayKeyUTC(c.date)] = c }
 
         return dict.values.sorted { $0.date < $1.date }
+    }
+
+    /// Günlük veride son mum bugünden gerideyse kısa güncelleme zorlanır.
+    /// BIST için gün kapanışı yerel takvimde takip edilir.
+    private func needsLatestRefresh(lastDate: Date?) -> Bool {
+        guard let lastDate else { return true }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Europe/Istanbul") ?? .current
+        let lastDay = cal.startOfDay(for: lastDate)
+        let todayDay = cal.startOfDay(for: Date())
+        return lastDay < todayDay
     }
 }

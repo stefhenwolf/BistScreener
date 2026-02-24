@@ -187,10 +187,8 @@ final class ScannerViewModel: ObservableObject {
     }
 
     func startScan() {
-        services.ticker.stop()
-        NotificationCenter.default.post(name: .pauseMarketTicker, object: nil)
-
         cancelScan(silent: true)
+        pauseMarketTicker()
 
         let indexSnap = selectedIndex
         let indexCode = indexSnap.rawValue
@@ -203,6 +201,10 @@ final class ScannerViewModel: ObservableObject {
 
         scanTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                self.isScanning = false
+                self.resumeMarketTicker()
+            }
 
             do {
                 let snap = try await self.services.indexService.fetchSnapshot(indexCode: indexCode)
@@ -215,7 +217,6 @@ final class ScannerViewModel: ObservableObject {
                         self.errorText = "Sembol listesi boş geldi."
                         self.progressText = ""
                     }
-                    self.isScanning = false
                     return
                 }
 
@@ -226,12 +227,10 @@ final class ScannerViewModel: ObservableObject {
                     self.progressText = "İptal edildi."
                     self.progressValue = 0
                 }
-                self.isScanning = false
             } catch {
                 if !Task.isCancelled, self.selectedIndex == indexSnap {
                     self.errorText = error.localizedDescription
                 }
-                self.isScanning = false
             }
         }
     }
@@ -271,6 +270,7 @@ final class ScannerViewModel: ObservableObject {
         scanTask?.cancel()
         scanTask = nil
         isScanning = false
+        resumeMarketTicker()
 
         if !silent {
             progressText = "İptal edildi."
@@ -282,7 +282,6 @@ final class ScannerViewModel: ObservableObject {
 
     private func runScan(symbols: [String], indexSnap: IndexOption) async {
         if self.selectedIndex != indexSnap {
-            self.isScanning = false
             return
         }
         guard !Task.isCancelled else { return }
@@ -344,11 +343,14 @@ final class ScannerViewModel: ObservableObject {
                 self.progressText = "İptal edildi."
                 self.progressValue = 0
             }
-            self.isScanning = false
             return
         }
 
-        // Sorting is now handled by the view (ScanView)
+        // maxResults en iyi skorlar üzerinden kesilsin (tamamlanma sırasına göre değil).
+        localResults.sort {
+            if $0.uiScore != $1.uiScore { return $0.uiScore > $1.uiScore }
+            return $0.symbol < $1.symbol
+        }
 
         // maxResults apply (0 = all)
         if maxResults > 0, localResults.count > maxResults {
@@ -382,11 +384,6 @@ final class ScannerViewModel: ObservableObject {
             self.progressValue = 1
         }
 
-        services.ticker.start()
-        NotificationCenter.default.post(name: .resumeMarketTicker, object: nil)
-
-        self.isScanning = false
-
         // ✅ Persist (disk overwrite) - indexSnap!
         persistSnapshotAsync(indexSnap: indexSnap, universeCount: total, results: localResults, savedAt: savedAt)
 
@@ -395,6 +392,16 @@ final class ScannerViewModel: ObservableObject {
             universeCount: total,
             matchesCount: localResults.count
         )
+    }
+
+    private func pauseMarketTicker() {
+        services.ticker.stop()
+        NotificationCenter.default.post(name: .pauseMarketTicker, object: nil)
+    }
+
+    private func resumeMarketTicker() {
+        services.ticker.start()
+        NotificationCenter.default.post(name: .resumeMarketTicker, object: nil)
     }
 
     // MARK: - Persist
@@ -479,12 +486,13 @@ final class ScannerViewModel: ObservableObject {
             // patterns istersen UI'da göstermek için kalsın (opsiyonel)
             let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(60)))  // 120 -> 60
 
-            // ✅ Tomorrow BUY-only
-            let lookback = preset == .relaxed ? 10 : 20  // Kısa lookback for relaxed
+            let regime = MarketRegimeDetector.detect(from: recent)
+
+            // ✅ Tomorrow BUY-only (v2: lookback preset'ten otomatik gelir)
             let tomo = SignalScorer.scoreTomorrowBuyOnly(
                 candles: recent,
                 preset: preset,
-                lookback: lookback
+                regime: regime
             )
 
             guard let tomo else {
@@ -522,13 +530,10 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    /// Cache varsa hızlı (>=50). Yoksa 6mo indirir.
+    /// CandleRepository üzerinden yükler:
+    /// cache kullanır, ama veri günü gerideyse latest refresh de dener.
     private func loadCandlesForScan(symbol: String) async throws -> [Candle] {
         let sym = symbol.normalizedBISTSymbol()
-
-        if let disk = await CandleCache.shared.load(symbol: sym), disk.count >= 50 {
-            return disk
-        }
 
         try Task.checkCancellation()
 

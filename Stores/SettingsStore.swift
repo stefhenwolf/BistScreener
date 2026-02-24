@@ -24,7 +24,10 @@ final class SettingsStore: ObservableObject {
     // MARK: - Published
 
     @Published var defaultIndex: IndexOption {
-        didSet { UserDefaults.standard.set(defaultIndex.rawValue, forKey: Keys.defaultIndex) }
+        didSet {
+            UserDefaults.standard.set(defaultIndex.rawValue, forKey: Keys.defaultIndex)
+            notifyRuntimeSettingsChanged()
+        }
     }
 
     /// Tarama paralellik limiti (ScannerViewModel init’inde kullanacağız)
@@ -33,12 +36,16 @@ final class SettingsStore: ObservableObject {
             let clamped = min(max(concurrencyLimit, 1), 16)
             if clamped != concurrencyLimit { concurrencyLimit = clamped; return }
             UserDefaults.standard.set(concurrencyLimit, forKey: Keys.concurrency)
+            notifyRuntimeSettingsChanged()
         }
     }
 
     /// ✅ BUY-only preset
     @Published var preset: TomorrowPreset {
-        didSet { UserDefaults.standard.set(preset.rawValue, forKey: Keys.preset) }
+        didSet {
+            UserDefaults.standard.set(preset.rawValue, forKey: Keys.preset)
+            notifyRuntimeSettingsChanged()
+        }
     }
 
     @Published var maxResults: Int {
@@ -46,6 +53,7 @@ final class SettingsStore: ObservableObject {
             let clamped = max(0, maxResults)
             if clamped != maxResults { maxResults = clamped; return }
             UserDefaults.standard.set(maxResults, forKey: Keys.maxResults)
+            notifyRuntimeSettingsChanged()
         }
     }
 
@@ -73,5 +81,9 @@ final class SettingsStore: ObservableObject {
         concurrencyLimit = 8
         preset = .normal
         maxResults = 0
+    }
+
+    private func notifyRuntimeSettingsChanged() {
+        NotificationCenter.default.post(name: .appScanSettingsChanged, object: nil)
     }
 }

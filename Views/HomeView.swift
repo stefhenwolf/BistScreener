@@ -1,22 +1,32 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct HomeView: View {
+    private enum NavRoute: Hashable {
+        case assets
+    }
+
     @Binding var selectedTab: AppTab
+    let openStrategyPage: () -> Void
     @ObservedObject var scannerVM: ScannerViewModel
     @ObservedObject var tickerVM: MarketTickerViewModel
 
     @EnvironmentObject private var watchlist: WatchlistStore
 
     @StateObject private var favVM = FavoritesViewModel()
-    @StateObject private var portfolioVM = PortfolioViewModel()
+    @EnvironmentObject private var portfolioVM: PortfolioViewModel
+    @EnvironmentObject private var strategyStore: LiveStrategyStore
 
     @ObservedObject private var scanStats = ScanStatsStore.shared
     @State private var showAddSheet = false
+    @State private var isRefreshingHome = false
 
     @AppStorage("home_showPortfolioCard") private var showPortfolioCard: Bool = true
 
     private var homeIsLoading: Bool {
-        portfolioVM.isLoading || favVM.isLoading || tickerVM.isLoading
+        portfolioVM.isLoading || favVM.isLoading || tickerVM.isLoading || strategyStore.isRefreshing
     }
 
     var body: some View {
@@ -33,12 +43,17 @@ struct HomeView: View {
                     } else {
                         portfolioRevealCard
                     }
+                    strategyCard
 
                     scanSummaryCard
                     favoritesMoversCard
                 }
                 .padding(.horizontal, DS.s16)
                 .padding(.vertical, DS.s12)
+            }
+            .tint(.white)
+            .refreshable {
+                await refreshHomeData(triggerHaptic: true)
             }
         }
         .navigationTitle("Anasayfa")
@@ -58,19 +73,78 @@ struct HomeView: View {
             .presentationBackground(TVTheme.bg)
         }
         .onAppear {
-            favVM.refresh(symbols: watchlist.symbols)
-            portfolioVM.loadFromDiskAndRefresh()
+            Task { await refreshHomeData(triggerHaptic: false) }
         }
-        .onChange(of: watchlist.symbols) { _, new in
+        .onChangeCompat(of: watchlist.symbols) { new in
             favVM.refresh(symbols: new)
         }
-        .onChange(of: scannerVM.isScanning) { _, scanning in
+        .onChangeCompat(of: scannerVM.isScanning) { scanning in
             if scanning == false {
                 tickerVM.refreshNow()
                 favVM.refresh(symbols: watchlist.symbols)
             }
         }
-        .tvNavStyle() 
+        .navigationDestination(for: NavRoute.self) { route in
+            switch route {
+            case .assets:
+                AssetsTabRoot()
+            }
+        }
+        .tvNavStyle()
+    }
+
+    @MainActor
+    private func refreshHomeData(triggerHaptic: Bool) async {
+        guard !isRefreshingHome else { return }
+        isRefreshingHome = true
+
+        if triggerHaptic {
+            hapticImpact()
+        }
+
+        portfolioVM.clearPriceCache()
+        portfolioVM.loadFromDiskAndRefresh()
+        favVM.refresh(symbols: watchlist.symbols)
+        tickerVM.refreshNow()
+        if strategyStore.isRunning {
+            await strategyStore.refreshNow()
+        }
+
+        // Refreshable spinner için kısa bir bekleme + yük durumunun sakinleşmesi
+        try? await Task.sleep(nanoseconds: 180_000_000)
+        await waitUntilSettled(timeout: 2.8)
+
+        if triggerHaptic {
+            let hasError =
+                (portfolioVM.errorText?.isEmpty == false) ||
+                (favVM.errorText?.isEmpty == false) ||
+                (tickerVM.errorText?.isEmpty == false)
+            hapticResult(success: !hasError)
+        }
+
+        isRefreshingHome = false
+    }
+
+    @MainActor
+    private func waitUntilSettled(timeout: TimeInterval) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if !homeIsLoading { break }
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+    }
+
+    private func hapticImpact() {
+        #if os(iOS)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        #endif
+    }
+
+    private func hapticResult(success: Bool) {
+        #if os(iOS)
+        let gen = UINotificationFeedbackGenerator()
+        gen.notificationOccurred(success ? .success : .warning)
+        #endif
     }
 
     // MARK: - Quick Actions
@@ -143,6 +217,11 @@ struct HomeView: View {
                         .foregroundStyle(TVTheme.text)
                     Spacer()
 
+                    NavigationLink(value: NavRoute.assets) {
+                        TVChip("Detay", systemImage: "arrow.right")
+                    }
+                    .buttonStyle(.plain)
+
                     Button { showPortfolioCard = false } label: {
                         Image(systemName: "eye.slash")
                             .font(.body.weight(.semibold))
@@ -169,6 +248,8 @@ struct HomeView: View {
                     } else {
                         let total = portfolioVM.totalTRY
                         let pnl = portfolioVM.rows.compactMap(\.pnlTRY).reduce(0, +)
+                        let investedBase = max(0, total - pnl)
+                        let pnlPct = investedBase > 0 ? (pnl / investedBase) * 100.0 : 0
 
                         Text(total.formatted(.currency(code: "TRY")))
                             .font(.title2.bold())
@@ -185,13 +266,20 @@ struct HomeView: View {
                                 .font(.subheadline.weight(.bold))
                                 .foregroundStyle(pnl >= 0 ? TVTheme.up : TVTheme.down)
                                 .skeletonize(if: portfolioVM.isLoading)
+
+                            Text(String(format: "(%+.2f%%)", pnlPct))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(pnl >= 0 ? TVTheme.up : TVTheme.down)
+                                .skeletonize(if: portfolioVM.isLoading)
                         }
                     }
                 }
 
                 HStack(spacing: 10) {
                     if portfolioVM.isLoading {
-                        ProgressView().scaleEffect(0.9)
+                        ProgressView()
+                            .tint(.white)
+                            .scaleEffect(0.9)
                         Text("Güncelleniyor…")
                             .font(.caption)
                             .foregroundStyle(TVTheme.subtext)
@@ -212,7 +300,7 @@ struct HomeView: View {
 
                     Spacer()
 
-                    Button { portfolioVM.refreshPrices() } label: {
+                    Button { portfolioVM.clearPriceCache(); portfolioVM.refreshPrices() } label: {
                         TVChip("Yenile", systemImage: "arrow.clockwise")
                     }
                     .buttonStyle(.plain)
@@ -240,6 +328,67 @@ struct HomeView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
+    }
+
+    private var strategyCard: some View {
+        TVCard {
+            VStack(alignment: .leading, spacing: DS.s12) {
+                HStack {
+                    Text("Canlı Strateji")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(TVTheme.text)
+                    Spacer()
+                    TVChip("Stratejiye Git", systemImage: "arrow.right")
+                }
+
+                if strategyStore.isRunning {
+                    let pnl = strategyStore.totalReturnTL
+                    Text(strategyStore.totalValueTL.formatted(.currency(code: "TRY")))
+                        .font(.title3.bold())
+                        .foregroundStyle(TVTheme.text)
+
+                    HStack(spacing: 8) {
+                        Text("Toplam K/Z:")
+                            .font(.subheadline)
+                            .foregroundStyle(TVTheme.subtext)
+                        Text(pnl.formatted(.currency(code: "TRY")))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(pnl >= 0 ? TVTheme.up : TVTheme.down)
+                        Text(String(format: "%+.2f%%", strategyStore.totalReturnPct))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(pnl >= 0 ? TVTheme.up : TVTheme.down)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(TVTheme.surface2)
+                            .clipShape(Capsule())
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("Açık Pozisyon: \(strategyStore.holdings.count)")
+                            .font(.caption)
+                            .foregroundStyle(TVTheme.subtext)
+                        Spacer()
+                        if strategyStore.isRefreshing {
+                            ProgressView()
+                                .tint(.white)
+                                .scaleEffect(0.9)
+                        } else if let d = strategyStore.lastUpdated {
+                            Text("Güncelleme: \(d.formatted(date: .omitted, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(TVTheme.subtext)
+                        }
+                    }
+                } else {
+                    Text("Strateji pasif. Strateji sekmesinden başlangıç sermayesi ile başlatabilirsin.")
+                        .font(.subheadline)
+                        .foregroundStyle(TVTheme.subtext)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            openStrategyPage()
         }
     }
 
@@ -343,7 +492,7 @@ struct HomeView: View {
 
                 HStack(spacing: 10) {
                     TVChip("Toplam \(watchlist.symbols.count)", systemImage: "star.fill")
-                    if favVM.isLoading { TVChip("Yükleniyor", systemImage: "hourglass") }
+                    if favVM.isLoading { whiteLoadingChip("Yükleniyor", systemImage: "hourglass") }
                 }
                 .skeletonize(if: favVM.isLoading)
 
@@ -446,6 +595,22 @@ struct HomeView: View {
                 .skeletonize(if: true)
             }
         }
+    }
+
+    private func whiteLoadingChip(_ text: String, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(text)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(TVTheme.surface2)
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(TVTheme.stroke, lineWidth: 1))
     }
 }
 

@@ -29,12 +29,16 @@ struct StockDetailView: View {
     /// ✅ BUY-only Tomorrow analysis (canlı)
     @State private var tomorrow: TomorrowSignalScore? = nil
 
-    /// ✅ Sadece bilgi amaçlı: route snapshot geldiyse “Tarama Özeti” kartında göster
+    /// Route üzerinden gelen özet veri (header/fallback hesaplamaları için).
     @State private var snapshot: ScanResult? = nil
 
     @State private var isLoading = false
     @State private var isRefreshing = false
     @State private var errorText: String?
+    @AppStorage(BacktestKeys.takeProfitPct) private var takeProfitPct: Double = 20.0
+    @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
+    @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
+    @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
 
     // MARK: - Env
 
@@ -83,18 +87,13 @@ struct StockDetailView: View {
 
                 tvHeader
 
-                // ✅ Tarama’dan geldiyse meta
-                if let snap = snapshot {
-                    snapshotCard(snap)
-
-                    // ✅ snapshot tomorrow varsa ayrıca göster (BUY-only kart)
-                    if let snapCard = snapshotTomorrowCard(snap) {
-                        snapCard
-                    }
-                }
-
                 // ✅ canlı hesaplanan Tomorrow Bias
                 analysisCard
+
+                // ✅ Çıkış stratejisi (TP/SL/MaxDays)
+                if tomorrow != nil {
+                    exitStrategyCard
+                }
 
                 tvChartCard
                 tvPatternsCard
@@ -115,17 +114,12 @@ struct StockDetailView: View {
             .padding(.horizontal, DS.s16)
             .padding(.vertical, DS.s12)
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await refresh() } } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.body.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .disabled(isLoading || isRefreshing)
-            }
+#if !os(tvOS)
+        .refreshable {
+            await refresh()
         }
+#endif
+        .navigationBarTitleDisplayMode(.inline)
         .task(id: symbol) { await loadInitial() }
         .animation(.snappy, value: candles.count)
         .animation(.snappy, value: patterns.count)
@@ -153,6 +147,11 @@ struct StockDetailView: View {
                     Text(String(format: "%+.2f%%", pct))
                         .font(T.headerPct)
                         .foregroundStyle(isUp ? TVTheme.up : TVTheme.down)
+                }
+
+                let dataDate = activeCandle?.date ?? snapshot?.lastDate
+                if let dataDate {
+                    TVChip("Veri: \(dataDate.formatted(date: .abbreviated, time: .omitted))", systemImage: "calendar")
                 }
 
                 if let c = activeCandle {
@@ -206,88 +205,6 @@ struct StockDetailView: View {
 
     // MARK: - Cards
 
-    /// ✅ Sadece bilgilendirme: tarama snapshot metadata
-    private func snapshotCard(_ snap: ScanResult) -> some View {
-        TVCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Tarama Özeti")
-                        .font(T.title)
-                        .foregroundStyle(TVTheme.text)
-
-                    Spacer()
-
-                    TVChip("Snapshot", systemImage: "doc.text.magnifyingglass")
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        TVChip("\(snap.patterns.count) pattern", systemImage: "sparkles")
-                        TVChip(snap.lastDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
-                        if let q = snap.tomorrowQuality {
-                            TVChip("Q \(q)", systemImage: "checkmark.seal")
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-    }
-
-    /// Snapshot içinde tomorrow varsa göster
-    private func snapshotTomorrowCard(_ snap: ScanResult) -> AnyView? {
-        guard let t = snap.tomorrowTotal else { return nil }
-
-        let q = snap.tomorrowQuality ?? snap.uiQuality
-        let tier = snap.uiTierText ?? "—"
-        let meta = snap.uiMetaLine ?? ""
-
-        let reasons = (snap.tomorrowReasons ?? []).prefix(3)
-
-        return AnyView(
-            TVCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Tomorrow Bias (Snapshot)")
-                            .font(T.title)
-                            .foregroundStyle(TVTheme.text)
-
-                        Spacer()
-
-                        qualityBadge(q)
-                    }
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            TVChip("BUY", systemImage: "arrow.up.circle.fill")
-                            TVChip("Σ \(t)", systemImage: "sum")
-                            TVChip(tier, systemImage: "drop.fill")
-                        }
-                        .padding(.vertical, 2)
-                    }
-
-                    if !meta.isEmpty {
-                        Text(meta)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(TVTheme.subtext)
-                            .lineLimit(2)
-                    }
-
-                    if !reasons.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Array(reasons), id: \.self) { s in
-                                    TVChip(s, systemImage: "sparkles")
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                }
-            }
-        )
-    }
-
     /// ✅ Canlı: candles -> compute tomorrow
     private var analysisCard: some View {
         TVCard {
@@ -340,6 +257,111 @@ struct StockDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Exit Strategy Card
+
+    private var savedExitConfig: BacktestExitConfig {
+        BacktestExitConfig(
+            takeProfitPct: takeProfitPct,
+            stopLossPct: stopLossPct,
+            maxHoldDays: Int(maxHoldDays),
+            cooldownDays: Int(cooldownDays)
+        )
+    }
+
+    private var exitStrategyCard: some View {
+        let price = candles.last?.close ?? 0
+        let cfg = savedExitConfig
+
+        let tpPrice = price * (1.0 + cfg.takeProfitPct / 100.0)
+        let slPrice = price * (1.0 - cfg.stopLossPct / 100.0)
+        let signalDate = shownCandles.last?.date ?? snapshot?.lastDate ?? Date()
+        let projectedExit = Calendar.current.date(byAdding: .day, value: cfg.maxHoldDays, to: signalDate) ?? signalDate
+
+        return TVCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Çıkış Stratejisi")
+                        .font(T.title)
+                        .foregroundStyle(TVTheme.text)
+                    Spacer()
+                    TVChip("Multi-Day", systemImage: "calendar.badge.clock")
+                }
+
+                // Fiyat seviyeleri
+                HStack(spacing: 0) {
+                    exitLevelView(
+                        emoji: "🎯",
+                        label: "Kâr Al",
+                        pct: "+\(Int(cfg.takeProfitPct))%",
+                        price: tpPrice,
+                        color: TVTheme.up
+                    )
+                    exitLevelView(
+                        emoji: "🛑",
+                        label: "Zarar Kes",
+                        pct: "-\(Int(cfg.stopLossPct))%",
+                        price: slPrice,
+                        color: TVTheme.down
+                    )
+                }
+
+                // Alt bilgi
+                HStack(spacing: 12) {
+                    exitMiniChip("Max: \(cfg.maxHoldDays) gün", TVTheme.subtext)
+                    exitMiniChip("Giriş: \(String(format: "%.2f", price))", TVTheme.text)
+                }
+
+                HStack(spacing: 12) {
+                    exitMiniChip("Sinyal: \(signalDate.formatted(date: .abbreviated, time: .omitted))", TVTheme.subtext)
+                    exitMiniChip("Max Çıkış: \(projectedExit.formatted(date: .abbreviated, time: .omitted))", TVTheme.subtext)
+                }
+
+                // Risk/Reward
+                if cfg.stopLossPct > 0 {
+                    let rr = cfg.takeProfitPct / cfg.stopLossPct
+                    HStack(spacing: 6) {
+                        Text("Risk/Reward:")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(TVTheme.subtext)
+                        Text(String(format: "1:%.1f", rr))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(rr >= 2.5 ? TVTheme.up : (rr >= 1.5 ? .orange : TVTheme.down))
+                    }
+                }
+            }
+        }
+    }
+
+    private func exitLevelView(emoji: String, label: String, pct: String, price: Double, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(emoji)
+                .font(.system(size: 16))
+            Text(pct)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(color)
+            Text(String(format: "%.2f", price))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(TVTheme.text)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(TVTheme.subtext)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func exitMiniChip(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
     }
 
     private func metaLine(from t: TomorrowSignalScore) -> String? {
@@ -530,11 +552,10 @@ struct StockDetailView: View {
             patterns = snap.patterns
         }
 
-        // PRE-BREAKOUT: 20 günlük seviyeye yakınlık kontrolü
+        // PRE-BREAKOUT v2: lookback preset'ten otomatik gelir
         tomorrow = SignalScorer.scoreTomorrowBuyOnly(
             candles: recent,
-            preset: .normal,
-            lookback: 20
+            preset: .normal
         )
     }
 }

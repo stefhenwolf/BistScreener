@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		287999D5C846E9CB528C7E03 /* BacktestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FFE448784C1F55FE05A8BD6 /* BacktestView.swift */; };
 		291CC47D0116DDA05EBC56B3 /* BacktestEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B727F8018446328BD057EEE /* BacktestEngine.swift */; };
+		AA00BK012F5E000100AABBCC /* BacktestKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00BK002F5E000000AABBCC /* BacktestKeys.swift */; };
 		E90A24EE2F48C67D00772323 /* ScanScoringInfoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E1758E2F48C0500025EA76 /* ScanScoringInfoView.swift */; };
 		E90A24F42F48C84400772323 /* ScanResult+ScoringBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90A24F32F48C84300772323 /* ScanResult+ScoringBreakdown.swift */; };
 		E922C0782F4C210E000BA4B1 /* SignalBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = E922C0772F4C2103000BA4B1 /* SignalBreakdown.swift */; };
@@ -84,6 +85,7 @@
 /* Begin PBXFileReference section */
 		0B727F8018446328BD057EEE /* BacktestEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestEngine.swift; sourceTree = "<group>"; };
 		9FFE448784C1F55FE05A8BD6 /* BacktestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestView.swift; sourceTree = "<group>"; };
+		AA00BK002F5E000000AABBCC /* BacktestKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BacktestKeys.swift; sourceTree = "<group>"; };
 		E90A24F32F48C84300772323 /* ScanResult+ScoringBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ScanResult+ScoringBreakdown.swift"; sourceTree = "<group>"; };
 		E922C0772F4C2103000BA4B1 /* SignalBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalBreakdown.swift; sourceTree = "<group>"; };
 		E946B05A2F45310900F43C5B /* BistScreener.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BistScreener.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -211,6 +213,7 @@
 		E907A1E82F48E22100337091 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				E9BEFE8B2F4C36DC00E9B857 /* StrategyConfig.swift */,
 				E98E78432F4C000100A14DCF /* MarketRegimeDetector.swift */,
 				E9B036F02F4A88C20055DEE9 /* ScanScoringConfig.swift */,
 				E9B036EC2F4A63D20055DEE9 /* SignalScorer.swift */,
@@ -241,6 +244,7 @@
 		E907A1EA2F48E28300337091 /* Stores */ = {
 			isa = PBXGroup;
 			children = (
+				AA00BK002F5E000000AABBCC /* BacktestKeys.swift */,
 				E9B036EA2F4A62260055DEE9 /* CandleRepository.swift */,
 				E9B036E82F4A58100055DEE9 /* ScanScoringStore.swift */,
 				E960AE152F492CCE003E63A0 /* ScannerVMHolder.swift */,
@@ -269,7 +273,6 @@
 		E907A1EC2F48E2D800337091 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				E9BEFE8B2F4C36DC00E9B857 /* StrategyConfig.swift */,
 				E9FDA0EB2F4C33FD00D9478C /* StrategyConfigEditorView.swift */,
 				E9C3A71E2F49E106003E0096 /* ProfileView.swift */,
 				E960AE182F4931F0003E63A0 /* Components */,
@@ -510,6 +513,7 @@
 				E946B1672F4649B600F43C5B /* FormationsView.swift in Sources */,
 				E946B1212F45AE4900F43C5B /* WatchlistStore.swift in Sources */,
 				E960AE102F492642003E63A0 /* SettingsStore.swift in Sources */,
+				AA00BK012F5E000100AABBCC /* BacktestKeys.swift in Sources */,
 				E946B1392F45C0A000F43C5B /* FavoritesViewModel.swift in Sources */,
 				E946B11B2F45ADFC00F43C5B /* PatternDetector.swift in Sources */,
 				E9B036E92F4A58130055DEE9 /* ScanScoringStore.swift in Sources */,
@@ -584,6 +588,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -614,6 +619,7 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

@@ -16,6 +16,8 @@ struct BistScreenerApp: App {
                 .environmentObject(watchlist)
                 .environmentObject(services)
                 .environmentObject(settings)
+                .environmentObject(services.portfolio)
+                .environmentObject(services.strategy)
         }
     }
 }

@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum ProfileNavRoute: Hashable {
+    case assets
+    case strategy
+}
+
 struct ProfileView: View {
     @Binding var selectedTab: AppTab
 
@@ -7,8 +12,8 @@ struct ProfileView: View {
     @AppStorage("profile_role") private var role: String = "Doktor"
     @AppStorage("profile_note") private var note: String = "Kişisel not…"
 
-    @StateObject private var portfolioVM = PortfolioViewModel()
-    @State private var goAssets: Bool = false
+    @EnvironmentObject private var portfolioVM: PortfolioViewModel
+    @EnvironmentObject private var strategyStore: LiveStrategyStore
 
     var body: some View {
         ZStack {
@@ -18,8 +23,8 @@ struct ProfileView: View {
                 VStack(spacing: DS.s16) {
 
                     profileCard
-                    portfolioCard
-                    assetsEntryCard
+                    portfolioSummaryCard
+                    strategySummaryCard
 
                     Spacer(minLength: 12)
                 }
@@ -35,8 +40,13 @@ struct ProfileView: View {
         .tvNavStyle()
 
         // ✅ En stabil push
-        .navigationDestination(isPresented: $goAssets) {
-            AssetsTabRoot()
+        .navigationDestination(for: ProfileNavRoute.self) { route in
+            switch route {
+            case .assets:
+                AssetsTabRoot()
+            case .strategy:
+                StrategyView(selectedTab: $selectedTab)
+            }
         }
     }
 
@@ -64,17 +74,15 @@ struct ProfileView: View {
         }
     }
 
-    private var portfolioCard: some View {
+    private var portfolioSummaryCard: some View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("Portföy")
+                    Text("Portföy Özeti")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(TVTheme.text)
                     Spacer()
-                    Button {
-                        goAssets = true
-                    } label: {
+                    NavigationLink(value: ProfileNavRoute.assets) {
                         TVChip("Detay", systemImage: "arrow.right")
                     }
                     .buttonStyle(.plain)
@@ -116,19 +124,70 @@ struct ProfileView: View {
                     }
 
                     Spacer()
-
-                    .disabled(portfolioVM.isLoading)
                 }
             }
         }
     }
 
-    private var assetsEntryCard: some View {
-        Button {
-            goAssets = true
-        } label: {
-            
+    private var strategySummaryCard: some View {
+        TVCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Strateji Özeti")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(TVTheme.text)
+                    Spacer()
+                    NavigationLink(value: ProfileNavRoute.strategy) {
+                        TVChip("Detay", systemImage: "arrow.right")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if strategyStore.isRunning {
+                    let total = strategyStore.totalValueTL
+                    let pnl = strategyStore.totalReturnTL
+
+                    Text(total.formatted(.currency(code: "TRY")))
+                        .font(.title2.bold())
+                        .foregroundStyle(TVTheme.text)
+
+                    HStack(spacing: 8) {
+                        Text("Toplam K/Z:")
+                            .font(.subheadline)
+                            .foregroundStyle(TVTheme.subtext)
+
+                        Text(pnl.formatted(.currency(code: "TRY")))
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(pnl >= 0 ? TVTheme.up : TVTheme.down)
+                    }
+                } else {
+                    Text("Strateji pasif")
+                        .font(.title3.bold())
+                        .foregroundStyle(TVTheme.subtext)
+                    Text("Başlatmak için Detay'a dokun.")
+                        .font(.subheadline)
+                        .foregroundStyle(TVTheme.subtext)
+                }
+
+                HStack(spacing: 10) {
+                    if strategyStore.isRefreshing {
+                        ProgressView().scaleEffect(0.9).tint(.white)
+                        Text("Güncelleniyor…")
+                            .font(.caption)
+                            .foregroundStyle(TVTheme.subtext)
+                    } else if let d = strategyStore.lastUpdated {
+                        Text("Güncelleme: \(d.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(TVTheme.subtext)
+                    } else {
+                        Text("—")
+                            .font(.caption)
+                            .foregroundStyle(TVTheme.subtext)
+                    }
+
+                    Spacer()
+                }
+            }
         }
-        .buttonStyle(.plain)
     }
 }

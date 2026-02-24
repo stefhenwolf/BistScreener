@@ -43,7 +43,7 @@ struct FavoritesView: View {
         .onAppear {
             vm.setSymbols(watchlist.symbols)
         }
-        .onChange(of: watchlist.symbols) { _, new in
+        .onChangeCompat(of: watchlist.symbols) { new in
             withAnimation(.snappy) {
                 vm.setSymbols(new)
             }
@@ -60,6 +60,9 @@ struct FavoritesView: View {
                 }
             }
             .environmentObject(watchlist)
+        }
+        .navigationDestination(for: StockDetailRoute.self) { route in
+            StockDetailView(route: route)
         }
         .animation(.snappy, value: vm.rows.count)
         
@@ -168,9 +171,7 @@ struct FavoritesView: View {
         return AnyView(
             List {
                 ForEach(vm.rows) { r in
-                    NavigationLink {
-                        StockDetailView(route: .live(symbol: r.symbol))
-                    } label: {
+                    NavigationLink(value: StockDetailRoute.live(symbol: r.symbol)) {
                         FavoriteRowPro(r: r)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

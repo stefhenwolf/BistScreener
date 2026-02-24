@@ -15,12 +15,21 @@ enum TomorrowPreset: String, Codable, CaseIterable {
         }
     }
 
-    /// BUY minimum total threshold
+    /// BUY minimum total threshold (non-linear skorlama ile kalibre edildi)
     var minBuyTotal: Int {
         switch self {
-        case .relaxed: return 30  // Gevşek – daha fazla aday gösterir
-        case .normal:  return 50  // Dengeli
-        case .strict:  return 65  // Sıkı – yalnızca en güçlü sinyaller
+        case .relaxed: return 40   // ~%30-50 geçer (8-15 / 30 hisse)
+        case .normal:  return 52   // ~%10-25 geçer (3-8  / 30 hisse)
+        case .strict:  return 65   // ~%0-10  geçer (0-3  / 30 hisse)
+        }
+    }
+
+    /// Preset-specific lookback (kısa lookback = daha yakın zirve, daha fazla aday)
+    var lookbackDays: Int {
+        switch self {
+        case .relaxed: return 15
+        case .normal:  return 20
+        case .strict:  return 25
         }
     }
 
@@ -92,7 +101,15 @@ struct TomorrowBreakdown: Codable, Equatable, Hashable {
     var notes: [String] = []
 }
 
-// MARK: - Tomorrow BUY-only Scorer (PRE-BREAKOUT Strategy)
+// MARK: - Tomorrow BUY-only Scorer (PRE-BREAKOUT Strategy v2)
+// ═══════════════════════════════════════════════════════════
+// v2 Farkları:
+//   1. Tüm presetler softMode kullanır (hard guard yok)
+//   2. Non-linear scoring: Gaussian proximity, Sigmoid CLV
+//   3. Today change ceza olarak uygulanır (guard değil)
+//   4. Ağırlıklar: proximity=35, vol=20, clv=20, comp=15, trend=10
+//   5. Kalibre minScore: relaxed=40, normal=52, strict=65
+// ═══════════════════════════════════════════════════════════
 
 enum SignalScorer {
 
@@ -107,6 +124,167 @@ enum SignalScorer {
         case scoreBelowMin
         case refLevelInvalid
     }
+
+    // MARK: - Interpolation helper
+
+    /// Lineer interpolasyon: a → b arası, t ∈ [0,1]
+    private static func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
+        a + (b - a) * max(0, min(1, t))
+    }
+
+    // MARK: - ═══════════════════════════════════════
+    // NON-LINEAR SCORING FUNCTIONS (v2)
+    // ═══════════════════════════════════════════════
+
+    /// Proximity: Asimetrik Gaussian bell curve (v3 — daha sıkı, kırılıma yakın)
+    /// Sweet spot: 0.97-1.01 (kırılıma %0-3 mesafe)
+    /// Peak: 0.99 (kırılımın %1 altı = en ideal birikim noktası)
+    /// Sol sigma: 0.040 → 0.95'te skor 0.54, 0.93'te skor 0.22
+    /// Sağ sigma: 0.025 → 1.015'te skor 0.61, 1.04'te skor 0.08
+    /// Daha seçici: sadece kırılıma gerçekten yakın olanlar yüksek skor alır
+    private static func scoreProximityNonLinear(_ p: Double) -> Double {
+        // Aşırı uçlarda sıfır
+        if p < 0.88 || p > 1.08 { return 0 }
+
+        let center = 0.99
+        // Sol: sigma=0.040 → yaklaşanlar toleranslı ama seçici
+        // Sağ: sigma=0.025 → kırmış hisseler hızla puan kaybeder
+        let sigma = p < center ? 0.040 : 0.025
+        return exp(-pow((p - center) / sigma, 2))
+    }
+
+    /// CLV: Sigmoid curve
+    /// 0.0 (en düşükte kapanış) → 0.02 skor
+    /// 0.5 (ortada kapanış) → 0.50 skor
+    /// 0.8 (güçlü kapanış) → 0.92 skor
+    /// 1.0 (en yüksekte kapanış) → 0.98 skor
+    private static func scoreCLVNonLinear(_ clv: Double) -> Double {
+        // Sigmoid: 1 / (1 + e^(-k*(x-0.5)))
+        // k=8 → yeterince dik ama smooth
+        return 1.0 / (1.0 + exp(-8.0 * (clv - 0.5)))
+    }
+
+    /// Volume Trend: Parçalı (piecewise) fonksiyon
+    /// Ideal: 1.2-2.5x (organik hacim artışı = akıllı para birikimi)
+    /// Düşük (<0.7): ilgi azalmış → düşük skor
+    /// Çok yüksek (>3.0): haber/manipülasyon riski → skor düşer
+    private static func scoreVolumeTrendNonLinear(_ vt: Double) -> Double {
+        if vt < 0.3 { return 0 }
+        if vt < 0.7 { return lerp(0, 0.20, (vt - 0.3) / 0.4) }
+        if vt < 1.0 { return lerp(0.20, 0.50, (vt - 0.7) / 0.3) }
+        if vt < 1.5 { return lerp(0.50, 0.85, (vt - 1.0) / 0.5) }
+        if vt < 2.5 { return lerp(0.85, 1.0, (vt - 1.5) / 1.0) }
+        if vt < 4.0 { return lerp(1.0, 0.60, (vt - 2.5) / 1.5) }
+        return 0.50  // Aşırı hacim, belirsiz sinyal
+    }
+
+    /// Range Compression: Ters orantı (düşük = daha sıkışmış = daha iyi)
+    /// <0.5: Çok sıkışmış → patlama enerjisi birikmiş → 1.0
+    /// 0.5-0.8: İyi sıkışma → 0.70-0.90
+    /// 0.8-1.0: Hafif sıkışma → 0.45-0.70
+    /// 1.0-1.5: Genişleme → 0.15-0.45 (breakout/breakdown olabilir)
+    /// >1.5: Güçlü genişleme → 0-0.15 (hareket başlamış)
+    private static func scoreCompressionNonLinear(_ rc: Double) -> Double {
+        if rc < 0.3 { return 1.0 }
+        if rc < 0.5 { return lerp(1.0, 0.92, (rc - 0.3) / 0.2) }
+        if rc < 0.8 { return lerp(0.92, 0.70, (rc - 0.5) / 0.3) }
+        if rc < 1.0 { return lerp(0.70, 0.45, (rc - 0.8) / 0.2) }
+        if rc < 1.3 { return lerp(0.45, 0.25, (rc - 1.0) / 0.3) }
+        if rc < 1.8 { return lerp(0.25, 0.10, (rc - 1.3) / 0.5) }
+        if rc < 2.5 { return lerp(0.10, 0.0, (rc - 1.8) / 0.7) }
+        return 0
+    }
+
+    /// Trend: EMA alignment skoru
+    /// Tam hizalama (close > EMA20 > EMA50) → 1.0 (güçlü boğa trendi)
+    /// EMA50 üzeri → 0.60 (trend yukarı ama EMA cross belirsiz)
+    /// EMA50'ye yakın (%2 içinde) → 0.35 (nötr, destek testi olabilir)
+    /// EMA50 altı → 0.10 (ayı bölgesi, kırılım düşük olasılık)
+    private static func scoreTrend(lastClose: Double, ema20: Double, ema50: Double) -> Double {
+        // Tam bullish alignment: close > EMA20 > EMA50
+        if lastClose > ema20 && ema20 > ema50 { return 1.0 }
+        // Close EMA50 üzerinde ama EMA'lar cross etmemiş
+        if lastClose > ema50 { return 0.60 }
+        // EMA50'ye çok yakın (destek bölgesi, bounce potansiyeli)
+        if ema50 > 0 && lastClose > ema50 * 0.98 { return 0.35 }
+        // EMA50 altı - ayı trendi
+        return 0.10
+    }
+
+    /// Momentum Adjustment: Küçük pozitif hareket = alıcı momentum (bonus)
+    /// +0.5% ile +3% arası: Gaussian bonus (peak ~+5 puan @ %1.5)
+    /// +5% üzeri: Ceza (uzamış, giriş riskli)
+    /// -4% altı: Ceza (zayıflık sinyali)
+    /// Net etki: -20 ile +5 arası puan
+    private static func momentumAdjustment(_ changePct: Double) -> Double {
+        // ── BONUS: Küçük pozitif hareket → alıcı momentum ──
+        if changePct >= 0.3 && changePct <= 4.0 {
+            // Gaussian bonus: peak ~1.5% → +5 puan
+            let center = 1.5
+            let sigma = 1.2
+            return 5.0 * exp(-pow((changePct - center) / sigma, 2))
+        }
+
+        // ── PENALTY: Aşırı yükseliş → uzamış, giriş riski ──
+        if changePct > 5.0 {
+            return -min(20.0, (changePct - 5.0) * 4.0)
+        }
+
+        // ── PENALTY: Sert düşüş → zayıflık sinyali ──
+        if changePct < -4.0 {
+            return -min(12.0, (abs(changePct) - 4.0) * 2.5)
+        }
+
+        return 0
+    }
+
+    /// Setup Synergy:
+    /// Kırılıma yakın + kontrollü hacim artışı + sıkışma + güçlü kapanış
+    /// birlikte geldiğinde küçük bonus ver.
+    private static func setupSynergyAdjustment(
+        proximity: Double,
+        volumeTrend: Double,
+        rangeCompression: Double,
+        clv: Double
+    ) -> Double {
+        var bonus: Double = 0
+        if proximity >= 0.965 && proximity <= 1.01 { bonus += 1.5 }
+        if volumeTrend >= 1.1 && volumeTrend <= 2.6 { bonus += 1.0 }
+        if rangeCompression <= 0.95 { bonus += 1.0 }
+        if clv >= 0.65 { bonus += 1.0 }
+        return min(4.0, bonus)
+    }
+
+    /// Volatilite anomalisi varsa daha seçici ol.
+    private static func dynamicMinScoreDelta(
+        trSpikeMultiple: Double,
+        liquidityTier: LiquidityTier
+    ) -> Int {
+        var delta = 0
+
+        if trSpikeMultiple >= 3.2 {
+            delta += 8
+        } else if trSpikeMultiple >= 2.4 {
+            delta += 5
+        } else if trSpikeMultiple >= 1.9 {
+            delta += 2
+        }
+
+        switch liquidityTier {
+        case .a:
+            break
+        case .b:
+            delta += 1
+        case .c:
+            delta += 3
+        case .none:
+            delta += 6
+        }
+
+        return delta
+    }
+
+    // MARK: - Debug
 
     /// Her koşulu ayrı ayrı kontrol eder, neden reddedildiğini detaylı döner
     static func debugScoreWithConfig(candles: [Candle], config: StrategyConfig) -> (result: TomorrowSignalScore?, reject: Reject?, notes: [String]) {
@@ -129,19 +307,12 @@ enum SignalScorer {
         let avgValue20 = ValueSeries.averageValue(closes: closes, volumes: volumes, period: 20) ?? 0
         let valueToday = last.close * Double(last.volume)
         let valueMultiple = (avgValue20 > 0) ? (valueToday / avgValue20) : 0
-        notes.append(String(format: "valueMult=%.2f (min=%.2f)", valueMultiple, config.minValueMultiple))
-        if valueMultiple < config.minValueMultiple {
-            notes.append("⛔ valueMultiple düşük")
-        }
+        notes.append(String(format: "valueMult=%.2f", valueMultiple))
 
         // CLV
-        let clv = CLV.value(candle: last)
-        if let c = clv {
-            notes.append(String(format: "clv=%.3f (min=%.2f)", c, config.minCLV))
-            if c < config.minCLV { notes.append("⛔ CLV düşük") }
-        } else {
-            notes.append("⛔ CLV=nil (high==low)")
-        }
+        let clv = CLV.value(candle: last) ?? 0.5
+        let clvScore = scoreCLVNonLinear(clv)
+        notes.append(String(format: "clv=%.3f → skor=%.2f", clv, clvScore))
 
         // Proximity
         let closesExToday = Array(closes.dropLast())
@@ -153,9 +324,12 @@ enum SignalScorer {
 
         if refLevel > 0 {
             let proximity = last.close / refLevel
-            notes.append(String(format: "proximity=%.4f (range=%.2f..%.3f)", proximity, config.minProximity, config.maxProximity))
-            if proximity < config.minProximity { notes.append("⛔ proximity çok düşük (zirvedent uzak)") }
-            if proximity > config.maxProximity { notes.append("⛔ proximity çok yüksek (zaten kırdı)") }
+            let proxScore = scoreProximityNonLinear(proximity)
+            notes.append(String(format: "proximity=%.4f → skor=%.2f (sweet: 0.97-1.00)", proximity, proxScore))
+
+            if proxScore < 0.3 {
+                notes.append("⚠️ proximity düşük skor (sweet spot: 0.97-1.00)")
+            }
         } else {
             notes.append("⛔ refLevel=0")
             return (nil, .refLevelInvalid, notes)
@@ -167,7 +341,8 @@ enum SignalScorer {
         let avgRecentVol = recentVols.isEmpty ? 0 : recentVols.reduce(0, +) / Double(recentVols.count)
         let avgOlderVol  = olderVols.isEmpty ? 1 : olderVols.reduce(0, +) / Double(olderVols.count)
         let volumeTrend = avgOlderVol > 0 ? (avgRecentVol / avgOlderVol) : 1.0
-        notes.append(String(format: "volTrend=%.2f (min=%.2f)", volumeTrend, config.minVolumeTrend))
+        let volScore = scoreVolumeTrendNonLinear(volumeTrend)
+        notes.append(String(format: "volTrend=%.2f → skor=%.2f (ideal: 1.2-2.5)", volumeTrend, volScore))
 
         // Range compression
         let recentRanges = candles.suffix(5).map { $0.high - $0.low }
@@ -175,28 +350,27 @@ enum SignalScorer {
         let avgRecentRange = recentRanges.isEmpty ? 0 : recentRanges.reduce(0, +) / Double(recentRanges.count)
         let avgOlderRange  = olderRanges.isEmpty ? 1 : olderRanges.reduce(0, +) / Double(olderRanges.count)
         let rangeCompression = avgOlderRange > 0 ? (avgRecentRange / avgOlderRange) : 1.0
-        notes.append(String(format: "rangeComp=%.2f (max=%.2f)", rangeCompression, config.maxRangeCompression))
+        let compScore = scoreCompressionNonLinear(rangeCompression)
+        notes.append(String(format: "rangeComp=%.2f → skor=%.2f (düşük=iyi)", rangeCompression, compScore))
 
         // Today change
         let prevClose = candles.count >= 2 ? candles[candles.count - 2].close : last.close
         let todayChangePct = prevClose > 0 ? ((last.close - prevClose) / prevClose) * 100 : 0
-        notes.append(String(format: "todayChg=%.1f%% (max=%.1f%%)", todayChangePct, config.maxTodayChangePct))
+        let momAdj = momentumAdjustment(todayChangePct)
+        notes.append(String(format: "todayChg=%.1f%% → momentum=%+.1f puan", todayChangePct, momAdj))
+
+        // Trend
+        let ema20 = EMA.lastValue(values: closes, period: 20) ?? 0
+        let ema50 = EMA.lastValue(values: closes, period: 50) ?? 0
+        let trendScore = scoreTrend(lastClose: last.close, ema20: ema20, ema50: ema50)
+        notes.append(String(format: "trend=%.2f (close=%.2f ema20=%.2f ema50=%.2f)", trendScore, last.close, ema20, ema50))
 
         // Gerçek skoru al (softMode ile)
         let result = scoreWithConfig(candles: candles, config: config, softMode: true)
         if let r = result {
-            notes.append("✅ softMode score=\(r.total)")
+            notes.append("✅ SKOR=\(r.total) kalite=\(r.quality)")
         } else {
-            notes.append("❌ softMode bile nil döndü (veri sorunu)")
-        }
-
-        // Strict skoru da dene
-        let strictResult = scoreWithConfig(candles: candles, config: config, softMode: false)
-        if let sr = strictResult {
-            notes.append("✅ strict score=\(sr.total)")
-            return (sr, nil, notes)
-        } else {
-            notes.append("❌ strict nil (hard guard'lardan biri eledi)")
+            notes.append("❌ skor eşiğin altında (min=\(config.minScore))")
         }
 
         return (result, result == nil ? .scoreBelowMin : nil, notes)
@@ -213,43 +387,71 @@ enum SignalScorer {
     static func scoreTomorrowBuyOnly(
         candles: [Candle],
         preset: TomorrowPreset,
-        lookback: Int = 20
+        regime: MarketRegime? = nil,
+        lookback: Int? = nil
     ) -> TomorrowSignalScore? {
-        // Preset → StrategyConfig dönüşümü
+        // v2: Preset → StrategyConfig dönüşümü
+        // Tüm presetler softMode kullanır.
+        // Lookback: Normal preset'te StrategyConfig.lookbackDays aktif;
+        // Relaxed/Strict için preset lookback kullanılır (opsiyonel manuel override hariç).
         var cfg = StrategyConfig.load()
-        cfg.lookbackDays = lookback
-        let useSoftMode: Bool
-        switch preset {
-        case .relaxed:
-            cfg.minProximity = 0.85
-            cfg.maxProximity = 1.05
-            cfg.minValueMultiple = 0.0
-            cfg.minVolumeTrend = 0.0       // filtre kapalı
-            cfg.minCLV = 0.10
-            cfg.maxRangeCompression = 3.0
-            cfg.maxTodayChangePct = 10.0
-            cfg.minScore = preset.minBuyTotal
-            useSoftMode = true  // ✅ Relaxed modda hard guard'lar kapalı
-        case .normal:
-            useSoftMode = false
-        case .strict:
-            cfg.minProximity = 0.97
-            cfg.maxProximity = 1.002
-            cfg.minValueMultiple = 1.2
-            cfg.minVolumeTrend = 1.1
-            cfg.minCLV = 0.70
-            cfg.maxRangeCompression = 1.1
-            cfg.maxTodayChangePct = 3.0
-            cfg.minScore = preset.minBuyTotal
-            useSoftMode = false
-        }
-        return scoreWithConfig(candles: candles, config: cfg, softMode: useSoftMode)
+        cfg.lookbackDays = effectiveLookback(
+            preset: preset,
+            configuredLookback: cfg.lookbackDays,
+            overrideLookback: lookback
+        )
+        let activeRegime = regime ?? MarketRegimeDetector.detect(from: candles)
+        cfg.minScore = dynamicMinScore(for: preset, regime: activeRegime, config: cfg)
+
+        // ✅ v2: Tüm presetler softMode=true
+        // Non-linear scoring zaten seçiciliği sağlıyor
+        return scoreWithConfig(candles: candles, config: cfg, softMode: true)
     }
 
-    // MARK: - Core entry (config-based)
+    static func effectiveLookback(
+        preset: TomorrowPreset,
+        configuredLookback: Int,
+        overrideLookback: Int? = nil
+    ) -> Int {
+        func clamp(_ value: Int) -> Int { min(60, max(10, value)) }
 
-    /// PRE-BREAKOUT: StrategyConfig ile çalışan ana fonksiyon
-    /// softMode = true → hard guard'lar kapalı, sadece skor eşiği filtreler (relaxed mod)
+        if let overrideLookback {
+            return clamp(overrideLookback)
+        }
+
+        switch preset {
+        case .normal:
+            return clamp(configuredLookback) // Strategy editor'da ayarlanan değer
+        case .relaxed, .strict:
+            return preset.lookbackDays
+        }
+    }
+
+    static func dynamicMinScore(
+        for preset: TomorrowPreset,
+        regime: MarketRegime,
+        config: StrategyConfig
+    ) -> Int {
+        let base = preset.minBuyTotal
+        let adjusted: Int
+
+        switch regime {
+        case .bull:
+            adjusted = base + config.regimeBullDelta
+        case .sideways:
+            adjusted = base + config.regimeSidewaysDelta
+        case .bear:
+            adjusted = max(base + config.regimeBearDelta, config.regimeBearMinScore)
+        }
+
+        return min(95, max(0, adjusted))
+    }
+
+    // MARK: - Core scoring engine (v2)
+
+    /// PRE-BREAKOUT: Non-linear scoring with configurable weights
+    /// softMode=true → hard guard'lar kapalı, sadece skor eşiği filtreler
+    /// softMode=false → hard guard'lar aktif (manual config için)
     static func scoreWithConfig(
         candles: [Candle],
         config: StrategyConfig,
@@ -260,9 +462,6 @@ enum SignalScorer {
 
         // ── DATA GUARDS (her zaman aktif) ──
         guard candles.count >= max(lookback + 5, 40) else {
-            #if DEBUG
-            print("📊 REJECT: yetersiz mum sayısı (\(candles.count))")
-            #endif
             return nil
         }
         guard let last = candles.last else { return nil }
@@ -283,7 +482,7 @@ enum SignalScorer {
             guard valueMultiple >= config.minValueMultiple else { return nil }
         }
 
-        // ---------- CLV (high==low ise nil gelir → softMode'da 0.5 kullan)
+        // ---------- CLV (high==low ise nil → softMode'da 0.5)
         let clvValue: Double
         if let c = CLV.value(candle: last) {
             clvValue = c
@@ -310,9 +509,6 @@ enum SignalScorer {
 
         // refLevel=0 ise skor hesaplanamaz
         guard refLevel > 0 else {
-            #if DEBUG
-            print("📊 REJECT: refLevel=0")
-            #endif
             return nil
         }
 
@@ -360,87 +556,69 @@ enum SignalScorer {
         let trMedian20 = Rolling.medianLast(trSeries, window: 20) ?? 1
         let trSpikeMultiple = trMedian20 > 0 ? (trToday / trMedian20) : 1.0
 
-        // ---------- Compression check
+        // ---------- Compression check (for breakdown display)
         let compression = compressionOK(candles: candles, window: 8)
 
-        // ✅ SCORE BUILD (configurable weights)
-        // Skor hesaplaması için kullanılan scoring range'ler
-        // (softMode'da filtre kapalı ama skor aynı mantıkla hesaplanır)
-        let scoringMinProximity = softMode ? 0.90 : config.minProximity
-        let scoringMaxProximity = softMode ? 1.05 : config.maxProximity
-        let scoringMinCLV       = softMode ? 0.15 : config.minCLV
-        let scoringMaxCompression = softMode ? 2.0 : config.maxRangeCompression
+        // ═══════════════════════════════════════════════════
+        // NON-LINEAR SCORE BUILD (v2)
+        // ═══════════════════════════════════════════════════
 
-        let proximityScore: Double = {
-            let range = scoringMaxProximity - scoringMinProximity
-            guard range > 0 else { return proximity >= scoringMinProximity ? 1.0 : 0 }
-            // minProximity → 0, maxProximity → 1 (lineer)
-            let x = (proximity - scoringMinProximity) / range
-            return min(1, max(0, x))
-        }()
+        let proxScore  = scoreProximityNonLinear(proximity)
+        let clvScore   = scoreCLVNonLinear(clvValue)
+        let volScore   = scoreVolumeTrendNonLinear(volumeTrend)
+        let compScore  = scoreCompressionNonLinear(rangeCompression)
+        let trendScore = scoreTrend(lastClose: last.close, ema20: ema20, ema50: ema50)
 
-        let clvScore = scoreCLV(clvValue, minCLV: scoringMinCLV)
+        // Ağırlıklar (config'ten, kullanıcı ayarlayabilir)
+        let wP = config.weightProximity      // default 35
+        let wV = config.weightVolumeTrend    // default 20
+        let wC = config.weightCLV            // default 20
+        let wR = config.weightCompression    // default 15
+        let wT = config.weightTrend          // default 10
 
-        let volumeTrendScore: Double = {
-            if volumeTrend <= 0.5 { return 0 }
-            let x = (volumeTrend - 0.5) / 1.5
-            return min(1, max(0, x))
-        }()
-
-        let compressionScore: Double = {
-            if rangeCompression >= scoringMaxCompression { return 0 }
-            let x = (scoringMaxCompression - rangeCompression) / max(scoringMaxCompression - 0.3, 0.1)
-            return min(1, max(0, x))
-        }()
-
-        // ── BONUS: Trend skorunu da ekle (EMA50 üzerinde ise bonus) ──
-        let trendScore: Double = trendOK ? 1.0 : 0.3
-
-        // Ağırlıkları normalize et (toplam 100'e oranla)
-        let wProximity = config.weightProximity
-        let wVolume    = config.weightVolumeTrend
-        let wCLV       = config.weightCLV
-        let wCompress  = config.weightCompression
-        let wTrend     = 10.0  // Trend bonus ağırlığı (sabit)
-
-        let wTotal = wProximity + wVolume + wCLV + wCompress + wTrend
+        let wTotal = wP + wV + wC + wR + wT
         let normalizer = wTotal > 0 ? (100.0 / wTotal) : 1.0
 
-        // ⚠️ Skor hesaplaması: her bileşen 0..1, ağırlıklar toplamı ~110
-        // Formül: (score_i * weight_i) toplamı * normalizer → 0..100
-        let rawScore = (proximityScore    * wProximity +
-                        volumeTrendScore  * wVolume +
-                        clvScore          * wCLV +
-                        compressionScore  * wCompress +
-                        trendScore        * wTrend) * normalizer
+        // Ağırlıklı toplam → 0..100
+        let rawScore = (proxScore  * wP +
+                        volScore   * wV +
+                        clvScore   * wC +
+                        compScore  * wR +
+                        trendScore * wT) * normalizer
 
-        let total = min(100, max(0, Int(round(rawScore))))
+        // Momentum adjustment (bonus + ceza)
+        let momAdj = momentumAdjustment(todayChangePct)
 
-        #if DEBUG
-        // İlk birkaç hisse için detaylı debug
-        debugCounter += 1
-        if debugCounter <= 5 {
-            print("""
-            📊 SCORE[\(debugCounter)]: \(last.close) | prox=\(String(format:"%.3f",proximity)) proxS=\(String(format:"%.2f",proximityScore)) | \
-            clv=\(String(format:"%.2f",clvValue)) clvS=\(String(format:"%.2f",clvScore)) | \
-            vol=\(String(format:"%.2f",volumeTrend)) volS=\(String(format:"%.2f",volumeTrendScore)) | \
-            comp=\(String(format:"%.2f",rangeCompression)) compS=\(String(format:"%.2f",compressionScore)) | \
-            trend=\(trendOK) | TOTAL=\(total) min=\(config.minScore) \(total >= config.minScore ? "✅" : "❌")
-            """)
-        }
-        #endif
+        let synergyAdj = setupSynergyAdjustment(
+            proximity: proximity,
+            volumeTrend: volumeTrend,
+            rangeCompression: rangeCompression,
+            clv: clvValue
+        )
 
-        guard total >= config.minScore else { return nil }
+        let total = min(100, max(0, Int(round(rawScore + momAdj + synergyAdj))))
+        let effectiveMinScore = min(
+            95,
+            max(
+                0,
+                config.minScore + dynamicMinScoreDelta(
+                    trSpikeMultiple: trSpikeMultiple,
+                    liquidityTier: tier
+                )
+            )
+        )
+
+        guard total >= effectiveMinScore else { return nil }
 
         let quality = qualityBand(total: total, config: config)
 
-        // Reasons (max 3)
+        // Reasons (max 3) — non-linear skorlara göre
         var reasons: [String] = []
-        if proximityScore >= 0.7 { reasons.append("Kırılım Yakın") }
-        if volumeTrendScore >= 0.5 { reasons.append("Hacim Artışı") }
-        if compressionScore >= 0.5 { reasons.append("Sıkışma") }
-        if clvScore >= 0.7 { reasons.append("Güçlü Kapanış") }
-        if trendOK { reasons.append("Trend Yukarı") }
+        if proxScore >= 0.7  { reasons.append("Kırılım Yakın") }
+        if volScore >= 0.6   { reasons.append("Hacim Artışı") }
+        if compScore >= 0.6  { reasons.append("Sıkışma") }
+        if clvScore >= 0.7   { reasons.append("Güçlü Kapanış") }
+        if trendScore >= 0.8 { reasons.append("Trend Yukarı") }
         reasons = Array(reasons.prefix(3))
         if reasons.isEmpty { reasons.append("Pre-Breakout") }
 
@@ -478,7 +656,8 @@ enum SignalScorer {
             String(format: "Kırılıma %.1f%%", (proximity - 1.0) * 100),
             String(format: "Hacim x%.1f", volumeTrend),
             String(format: "Sıkışma %.2f", rangeCompression),
-            String(format: "Bugün %+.1f%%", todayChangePct)
+            String(format: "Bugün %+.1f%%", todayChangePct),
+            "Dinamik Eşik \(effectiveMinScore)"
         ]
 
         return TomorrowSignalScore(
@@ -492,9 +671,7 @@ enum SignalScorer {
         )
     }
 
-    // Debug counter (sadece ilk N hisse için detaylı log)
-    private static var debugCounter = 0
-    static func resetDebugCounter() { debugCounter = 0 }
+    static func resetDebugCounter() {}
 
     // MARK: - Helpers
 
@@ -513,14 +690,6 @@ enum SignalScorer {
         case config.qualityC...:     return "C"
         default:                     return "D"
         }
-    }
-
-    /// Normalize 0..1 score
-    private static func scoreCLV(_ clv: Double, minCLV: Double) -> Double {
-        if clv <= minCLV { return 0 }
-        let denom = max(1e-9, 1.0 - minCLV)
-        let x = (clv - minCLV) / denom
-        return min(1, max(0, x))
     }
 
     private static func compressionOK(candles: [Candle], window: Int, preset: TomorrowPreset = .normal) -> (ok: Bool, flagsHit: Int) {

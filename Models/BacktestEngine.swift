@@ -1,14 +1,168 @@
 import Foundation
+import Combine
 
-// MARK: - Backtest Result Types
+// MARK: - Exit Configuration
+
+/// Çok günlü pozisyon çıkış stratejisi parametreleri.
+/// TP/SL + maksimum pozisyon süresi.
+struct BacktestExitConfig: Codable, Equatable {
+    /// 1. kâr al seviyesi (%)  — giriş fiyatından +%5
+    var tp1Pct: Double = 5.0
+
+    /// 2. kâr al seviyesi (%)  — giriş fiyatından +%10
+    var tp2Pct: Double = 10.0
+
+    /// TP1 seviyesinde satılacak oran (%)
+    var tp1SellPercent: Double = 50.0
+
+    /// Zarar kes seviyesi (%) — giriş fiyatından -%6 aşağı (pozitif sayı)
+    var stopLossPct: Double = 6.0
+
+    /// Maksimum pozisyon süresi (iş günü)
+    var maxHoldDays: Int = 30
+
+    /// Aynı hisse için yeniden giriş bekleme süresi (iş günü)
+    var cooldownDays: Int = 3
+
+    /// Eski tek TP alanı uyumluluğu (TP2 = ana hedef)
+    var takeProfitPct: Double {
+        get { tp2Pct }
+        set { tp2Pct = newValue }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case tp1Pct
+        case tp2Pct
+        case tp1SellPercent
+        case takeProfitPct
+        case stopLossPct
+        case maxHoldDays
+        case cooldownDays
+    }
+
+    init() {}
+
+    init(
+        tp1Pct: Double = 5.0,
+        tp2Pct: Double = 10.0,
+        tp1SellPercent: Double = 50.0,
+        stopLossPct: Double = 6.0,
+        maxHoldDays: Int = 30,
+        cooldownDays: Int = 3
+    ) {
+        self.tp1Pct = tp1Pct
+        self.tp2Pct = tp2Pct
+        self.tp1SellPercent = tp1SellPercent
+        self.stopLossPct = stopLossPct
+        self.maxHoldDays = maxHoldDays
+        self.cooldownDays = cooldownDays
+        normalize()
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyTP = try c.decodeIfPresent(Double.self, forKey: .takeProfitPct) ?? 10.0
+        tp2Pct = try c.decodeIfPresent(Double.self, forKey: .tp2Pct) ?? legacyTP
+        tp1Pct = try c.decodeIfPresent(Double.self, forKey: .tp1Pct) ?? min(5.0, tp2Pct)
+        tp1SellPercent = try c.decodeIfPresent(Double.self, forKey: .tp1SellPercent) ?? 50.0
+        stopLossPct = try c.decodeIfPresent(Double.self, forKey: .stopLossPct) ?? 6.0
+        maxHoldDays = try c.decodeIfPresent(Int.self, forKey: .maxHoldDays) ?? 30
+        cooldownDays = try c.decodeIfPresent(Int.self, forKey: .cooldownDays) ?? 3
+        normalize()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(tp1Pct, forKey: .tp1Pct)
+        try c.encode(tp2Pct, forKey: .tp2Pct)
+        try c.encode(tp1SellPercent, forKey: .tp1SellPercent)
+        try c.encode(tp2Pct, forKey: .takeProfitPct)
+        try c.encode(stopLossPct, forKey: .stopLossPct)
+        try c.encode(maxHoldDays, forKey: .maxHoldDays)
+        try c.encode(cooldownDays, forKey: .cooldownDays)
+    }
+
+    mutating func normalize() {
+        tp2Pct = min(max(tp2Pct, 4), 50)
+        tp1Pct = min(max(tp1Pct, 1), 40)
+        if tp1Pct >= tp2Pct {
+            tp1Pct = max(1, tp2Pct - 1)
+        }
+        tp1SellPercent = min(max(tp1SellPercent, 10), 90)
+        stopLossPct = min(max(stopLossPct, 1), 25)
+        maxHoldDays = min(max(maxHoldDays, 1), 180)
+        cooldownDays = min(max(cooldownDays, 0), 30)
+    }
+
+    init(
+        takeProfitPct: Double,
+        stopLossPct: Double,
+        maxHoldDays: Int,
+        cooldownDays: Int
+    ) {
+        self.init(
+            tp1Pct: min(5.0, takeProfitPct),
+            tp2Pct: takeProfitPct,
+            tp1SellPercent: 50.0,
+            stopLossPct: stopLossPct,
+            maxHoldDays: maxHoldDays,
+            cooldownDays: cooldownDays
+        )
+    }
+}
+
+// MARK: - Portfolio Add-On Configuration
+
+enum BacktestAddOnMode: Int, Codable, CaseIterable {
+    case off = 0
+    case free = 1
+    case delayed = 2
+}
+
+struct BacktestPortfolioConfig: Codable, Equatable {
+    var addOnMode: BacktestAddOnMode = .off
+    var addOnWaitDays: Int = 5
+}
+
+// MARK: - Exit Reason
+
+enum ExitReason: String, Codable, CaseIterable {
+    case takeProfit    = "TP"
+    case stopLoss      = "SL"
+    case maxDays       = "Süre"
+    case open          = "Açık"
+
+    var label: String {
+        switch self {
+        case .takeProfit:   return "Kâr Al"
+        case .stopLoss:     return "Zarar Kes"
+        case .maxDays:      return "Süre Doldu"
+        case .open:         return "Pozisyon Açık"
+        }
+    }
+
+    var emoji: String {
+        switch self {
+        case .takeProfit:   return "🎯"
+        case .stopLoss:     return "🛑"
+        case .maxDays:      return "⏰"
+        case .open:         return "🟡"
+        }
+    }
+}
+
+// MARK: - Trade Result (Multi-Day)
 
 struct BacktestTradeResult: Identifiable, Codable {
     let id: UUID
     let symbol: String
-    let signalDate: Date
-    let signalClose: Double
-    let nextDayClose: Double
-    let nextDayChangePct: Double
+    let entryDate: Date
+    let entryPrice: Double
+    let exitDate: Date
+    let exitPrice: Double
+    let returnPct: Double
+    let daysHeld: Int
+    let exitReason: ExitReason
     let signalScore: Int
     let signalQuality: String
     let reasons: [String]
@@ -16,34 +170,63 @@ struct BacktestTradeResult: Identifiable, Codable {
     let volumeTrend: Double
     let rangeCompression: Double
 
-    var isWin: Bool { nextDayChangePct > 0 }
+    /// Peakten çıkış fiyatına kadar olan drawdown (%)
+    let maxDrawdownPct: Double
+
+    /// Pozisyon süresince ulaşılan en yüksek kâr (%)
+    let peakReturnPct: Double
+
+    /// TP1 tetiklendiyse gerçekleştiği gün (17:00 normalize)
+    let tp1Date: Date?
+
+    /// TP1'de gerçekleşen nakit çıkışı (kısmi satış tutarı)
+    let tp1Proceeds: Double?
+
+    var isWin: Bool { returnPct > 0 }
 
     init(
         symbol: String,
-        signalDate: Date,
-        signalClose: Double,
-        nextDayClose: Double,
+        entryDate: Date,
+        entryPrice: Double,
+        exitDate: Date,
+        exitPrice: Double,
+        daysHeld: Int,
+        exitReason: ExitReason,
         score: Int,
         quality: String,
         reasons: [String],
         proximity: Double,
         volumeTrend: Double,
-        rangeCompression: Double
+        rangeCompression: Double,
+        maxDrawdownPct: Double,
+        peakReturnPct: Double,
+        tp1Date: Date? = nil,
+        tp1Proceeds: Double? = nil,
+        returnPctOverride: Double? = nil
     ) {
         self.id = UUID()
         self.symbol = symbol
-        self.signalDate = signalDate
-        self.signalClose = signalClose
-        self.nextDayClose = nextDayClose
-        self.nextDayChangePct = ((nextDayClose - signalClose) / max(signalClose, 0.001)) * 100
+        self.entryDate = entryDate
+        self.entryPrice = entryPrice
+        self.exitDate = exitDate
+        self.exitPrice = exitPrice
+        self.returnPct = returnPctOverride ?? (entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100 : 0)
+        self.daysHeld = daysHeld
+        self.exitReason = exitReason
         self.signalScore = score
         self.signalQuality = quality
         self.reasons = reasons
         self.proximity = proximity
         self.volumeTrend = volumeTrend
         self.rangeCompression = rangeCompression
+        self.maxDrawdownPct = maxDrawdownPct
+        self.peakReturnPct = peakReturnPct
+        self.tp1Date = tp1Date
+        self.tp1Proceeds = tp1Proceeds
     }
 }
+
+// MARK: - Backtest Summary
 
 struct BacktestSummary {
     let totalSignals: Int
@@ -58,10 +241,26 @@ struct BacktestSummary {
     let profitFactor: Double
     let trades: [BacktestTradeResult]
 
+    // ── v2 Multi-Day Metrics ──
+    let avgDaysHeld: Double
+    let tpCount: Int
+    let slCount: Int
+    let maxDaysCount: Int
+    let openCount: Int
+    let avgPeakReturn: Double
+    let avgDrawdown: Double
+    let expectancyPct: Double
+    let maxDaysStrongCount: Int
+    let maxDaysMediumCount: Int
+    let maxDaysWeakCount: Int
+
     static let empty = BacktestSummary(
         totalSignals: 0, wins: 0, losses: 0,
         winRate: 0, avgReturn: 0, avgWinReturn: 0, avgLossReturn: 0,
-        maxWin: 0, maxLoss: 0, profitFactor: 0, trades: []
+        maxWin: 0, maxLoss: 0, profitFactor: 0, trades: [],
+        avgDaysHeld: 0, tpCount: 0, slCount: 0,
+        maxDaysCount: 0, openCount: 0, avgPeakReturn: 0, avgDrawdown: 0,
+        expectancyPct: 0, maxDaysStrongCount: 0, maxDaysMediumCount: 0, maxDaysWeakCount: 0
     )
 
     static func from(trades: [BacktestTradeResult]) -> BacktestSummary {
@@ -73,15 +272,29 @@ struct BacktestSummary {
         let winCount = winsArr.count
         let lossCount = lossesArr.count
 
-        let avgReturn = trades.map(\.nextDayChangePct).reduce(0, +) / Double(trades.count)
-        let avgWin = winsArr.isEmpty ? 0 : winsArr.map(\.nextDayChangePct).reduce(0, +) / Double(winCount)
-        let avgLoss = lossesArr.isEmpty ? 0 : lossesArr.map(\.nextDayChangePct).reduce(0, +) / Double(lossCount)
-        let maxW = trades.map(\.nextDayChangePct).max() ?? 0
-        let maxL = trades.map(\.nextDayChangePct).min() ?? 0
+        let avgReturn = trades.map(\.returnPct).reduce(0, +) / Double(trades.count)
+        let avgWin = winsArr.isEmpty ? 0 : winsArr.map(\.returnPct).reduce(0, +) / Double(winCount)
+        let avgLoss = lossesArr.isEmpty ? 0 : lossesArr.map(\.returnPct).reduce(0, +) / Double(lossCount)
+        let maxW = trades.map(\.returnPct).max() ?? 0
+        let maxL = trades.map(\.returnPct).min() ?? 0
 
-        let totalProfit = winsArr.map(\.nextDayChangePct).reduce(0, +)
-        let totalLoss = abs(lossesArr.map(\.nextDayChangePct).reduce(0, +))
+        let totalProfit = winsArr.map(\.returnPct).reduce(0, +)
+        let totalLoss = abs(lossesArr.map(\.returnPct).reduce(0, +))
         let pf = totalLoss > 0 ? (totalProfit / totalLoss) : (totalProfit > 0 ? 99 : 0)
+
+        // ── Multi-Day Metrics ──
+        let avgDays = Double(trades.map(\.daysHeld).reduce(0, +)) / Double(trades.count)
+        let tpCount = trades.filter { $0.exitReason == .takeProfit }.count
+        let slCount = trades.filter { $0.exitReason == .stopLoss }.count
+        let maxDaysCount = trades.filter { $0.exitReason == .maxDays }.count
+        let openCount = trades.filter { $0.exitReason == .open }.count
+        let avgPeak = trades.map(\.peakReturnPct).reduce(0, +) / Double(trades.count)
+        let avgDD = trades.map(\.maxDrawdownPct).reduce(0, +) / Double(trades.count)
+        let expectancyPct = (Double(winCount) / Double(trades.count)) * avgWin - (Double(lossCount) / Double(trades.count)) * abs(avgLoss)
+        let maxDaysTrades = trades.filter { $0.exitReason == .maxDays }
+        let maxDaysStrong = maxDaysTrades.filter { $0.signalQuality == "A+" || $0.signalQuality == "A" }.count
+        let maxDaysMedium = maxDaysTrades.filter { $0.signalQuality == "B" }.count
+        let maxDaysWeak = max(0, maxDaysTrades.count - maxDaysStrong - maxDaysMedium)
 
         return BacktestSummary(
             totalSignals: trades.count,
@@ -94,12 +307,23 @@ struct BacktestSummary {
             maxWin: maxW,
             maxLoss: maxL,
             profitFactor: pf,
-            trades: trades.sorted { $0.signalDate > $1.signalDate }
+            trades: trades.sorted { $0.entryDate > $1.entryDate },
+            avgDaysHeld: avgDays,
+            tpCount: tpCount,
+            slCount: slCount,
+            maxDaysCount: maxDaysCount,
+            openCount: openCount,
+            avgPeakReturn: avgPeak,
+            avgDrawdown: avgDD,
+            expectancyPct: expectancyPct,
+            maxDaysStrongCount: maxDaysStrong,
+            maxDaysMediumCount: maxDaysMedium,
+            maxDaysWeakCount: maxDaysWeak
         )
     }
 }
 
-// MARK: - Backtest Engine
+// MARK: - Backtest Engine (Multi-Day)
 
 @MainActor
 final class BacktestEngine: ObservableObject {
@@ -123,7 +347,12 @@ final class BacktestEngine: ObservableObject {
         progressText = "İptal edildi."
     }
 
-    func run(indexOption: IndexOption, preset: TomorrowPreset, lookback: Int) {
+    func run(
+        indexOption: IndexOption,
+        preset: TomorrowPreset,
+        exitConfig: BacktestExitConfig = BacktestExitConfig(),
+        portfolioConfig: BacktestPortfolioConfig = BacktestPortfolioConfig()
+    ) {
         if isRunning { return }
 
         errorText = nil
@@ -133,33 +362,47 @@ final class BacktestEngine: ObservableObject {
         isRunning = true
 
         task?.cancel()
+        let indexService = services.indexService
+        let yahoo = services.yahoo
 
-        task = Task.detached(priority: .userInitiated) { [weak self] in
-            guard let self else { return }
+        task = Task.detached(priority: .background) { [weak self] in
+            guard let engine = self else { return }
 
             do {
-                let trades = try await self.runBacktestBackground(indexOption: indexOption, preset: preset, lookback: lookback)
+                let trades = try await BacktestEngine.runBacktestBackground(
+                    indexService: indexService,
+                    yahoo: yahoo,
+                    indexOption: indexOption,
+                    preset: preset,
+                    exitConfig: exitConfig,
+                    portfolioConfig: portfolioConfig
+                ) { done, total, signalCount in
+                    await MainActor.run {
+                        engine.progress = Double(done) / Double(max(total, 1))
+                        engine.progressText = "\(done)/\(total) sembol (\(signalCount) sinyal)"
+                    }
+                }
 
                 if Task.isCancelled { throw CancellationError() }
 
                 let sum = BacktestSummary.from(trades: trades)
 
                 await MainActor.run {
-                    self.summary = sum
-                    self.progress = 1
-                    self.progressText = "Bitti. \(sum.totalSignals) sinyal."
-                    self.isRunning = false
+                    engine.summary = sum
+                    engine.progress = 1
+                    engine.progressText = "Bitti. \(sum.totalSignals) sinyal, WR: \(String(format: "%.0f", sum.winRate * 100))%, Avg: \(String(format: "%+.1f", sum.avgReturn))%"
+                    engine.isRunning = false
                 }
 
             } catch is CancellationError {
                 await MainActor.run {
-                    self.isRunning = false
-                    self.progressText = "İptal edildi."
+                    engine.isRunning = false
+                    engine.progressText = "İptal edildi."
                 }
             } catch {
                 await MainActor.run {
-                    self.isRunning = false
-                    self.errorText = error.localizedDescription
+                    engine.isRunning = false
+                    engine.errorText = error.localizedDescription
                 }
             }
         }
@@ -167,60 +410,95 @@ final class BacktestEngine: ObservableObject {
 
     // MARK: - Background runner
 
-    private func runBacktestBackground(
+    nonisolated static func runBacktestBackground(
+        indexService: BorsaIstanbulIndexService,
+        yahoo: YahooFinanceService,
         indexOption: IndexOption,
         preset: TomorrowPreset,
-        lookback: Int
+        exitConfig: BacktestExitConfig,
+        portfolioConfig: BacktestPortfolioConfig,
+        includeTodaySignals: Bool = false,
+        onProgress: @Sendable @escaping (_ done: Int, _ total: Int, _ signalCount: Int) async -> Void
     ) async throws -> [BacktestTradeResult] {
 
-        // 1) symbol universe
-        let snap = try await services.indexService.fetchSnapshot(indexCode: indexOption.rawValue)
+        // 1) Symbol universe
+        let snap = try await indexService.fetchSnapshot(indexCode: indexOption.rawValue)
         let symbolsAll = snap.yahooSymbols
-
         let symbols = symbolsAll.filter { $0.hasSuffix(".IS") }
 
-        let total = max(1, symbols.count)
+        guard !symbols.isEmpty else {
+            await onProgress(1, 1, 0)
+            return []
+        }
+
+        let total = symbols.count
         var done = 0
 
-        // 2) concurrency (Yahoo 429'u azaltmak için düşük tut)
-        let concurrency = (indexOption == .bistAll ? 1 : (indexOption == .xu100 ? 2 : 3))
-        let sem = AsyncSemaphore(value: concurrency)
+        let baseConfig = StrategyConfig.load()
+        let lookback = SignalScorer.effectiveLookback(
+            preset: preset,
+            configuredLookback: baseConfig.lookbackDays
+        )
+
+        // 2) Concurrency: tüm semboller için tek seferde task açma.
+        // BIST ALL için de tek worker yerine 2 worker kullanarak "dondu" hissini azalt.
+        let concurrency = (indexOption == .bistAll ? 2 : 3)
+        let updateStride = max(1, total / 40) // UI tarafına ~40 güncellemeden fazlasını yollama
+        await onProgress(0, total, 0)
 
         var collected: [BacktestTradeResult] = []
         collected.reserveCapacity(512)
 
         try await withThrowingTaskGroup(of: [BacktestTradeResult].self) { group in
-            for sym in symbols {
-                group.addTask { [services] in
-                    await sem.wait()
-                    defer { Task { await sem.signal() } }
+            var nextSymbolIndex = 0
+            let workerCount = min(concurrency, total)
 
+            for _ in 0..<workerCount {
+                let sym = symbols[nextSymbolIndex]
+                nextSymbolIndex += 1
+                group.addTask {
                     if Task.isCancelled { return [] }
 
-                    // küçük throttle (429'u düşürür)
-                    try? await Task.sleep(nanoseconds: 250_000_000) // 0.25s
-
                     return await BacktestEngine.backtestOneSymbolStatic(
-                        services: services,
+                        yahoo: yahoo,
                         symbol: sym,
                         preset: preset,
-                        lookback: lookback
+                        baseConfig: baseConfig,
+                        lookback: lookback,
+                        exitConfig: exitConfig,
+                        portfolioConfig: portfolioConfig,
+                        includeTodaySignals: includeTodaySignals
                     )
                 }
             }
 
-            for try await trades in group {
+            while let trades = try await group.next() {
                 if Task.isCancelled { throw CancellationError() }
 
                 done += 1
                 collected.append(contentsOf: trades)
 
-                let pct = Double(done) / Double(total)
-                let text = "\(done)/\(total) sembol"
+                if done == total || (done % updateStride == 0) {
+                    await onProgress(done, total, collected.count)
+                }
+                if done % 2 == 0 { await Task.yield() }
 
-                await MainActor.run {
-                    self.progress = pct
-                    self.progressText = text
+                if nextSymbolIndex < total {
+                    let sym = symbols[nextSymbolIndex]
+                    nextSymbolIndex += 1
+                    group.addTask {
+                        if Task.isCancelled { return [] }
+                        return await BacktestEngine.backtestOneSymbolStatic(
+                            yahoo: yahoo,
+                            symbol: sym,
+                            preset: preset,
+                            baseConfig: baseConfig,
+                            lookback: lookback,
+                            exitConfig: exitConfig,
+                            portfolioConfig: portfolioConfig,
+                            includeTodaySignals: includeTodaySignals
+                        )
+                    }
                 }
             }
         }
@@ -228,60 +506,157 @@ final class BacktestEngine: ObservableObject {
         return collected
     }
 
-    // MARK: - Single symbol backtest (static helper)
+    // MARK: - Single symbol backtest (multi-day)
 
-    private static func backtestOneSymbolStatic(
-        services: AppServices,
+    nonisolated private static func backtestOneSymbolStatic(
+        yahoo: YahooFinanceService,
         symbol: String,
         preset: TomorrowPreset,
-        lookback: Int
+        baseConfig: StrategyConfig,
+        lookback: Int,
+        exitConfig: BacktestExitConfig,
+        portfolioConfig: BacktestPortfolioConfig,
+        includeTodaySignals: Bool
     ) async -> [BacktestTradeResult] {
 
         var trades: [BacktestTradeResult] = []
+
         do {
             let sym = symbol.normalizedBISTSymbol()
 
-            let candles = try await services.candles.getCandles(
-                symbol: sym,
-                range: .mo6,
-                minCount: 120,
-                forceRefresh: false
-            )
+            let candles = try await fetchBacktestCandles(yahoo: yahoo, symbol: sym, minCount: 120)
 
             guard candles.count >= 80 else { return [] }
 
             let startIdx = max(55, lookback + 5)
-            let endIdx = candles.count - 2
-            guard endIdx > startIdx else { return [] }
+            // Bugünün mumu sadece 17:00-18:00 aralığında yeni giriş sinyali üretsin.
+            // Bu aralık dışında (17:00 öncesi ve 18:00 sonrası) yalnızca geçmiş günlerden giriş açılır.
+            let lastIdx = candles.count - 1
+            let deferTodayEntrySignals = includeTodaySignals
+                ? false
+                : Self.shouldDeferTodaySignalOutsideExecutionWindow(
+                    lastCandleDate: candles.last?.date
+                )
+            let signalEndIdx = deferTodayEntrySignals ? (lastIdx - 1) : lastIdx
+            guard signalEndIdx > startIdx else { return [] }
 
-            for dayIdx in startIdx...endIdx {
+            // Her günün AL sinyalini bir kez hesapla; maxDays uzatma kuralında tekrar tekrar skor hesaplamayı önler.
+            var signalsByDay: [TomorrowSignalScore?] = Array(repeating: nil, count: candles.count)
+            var signalSlice = Array(candles[0...startIdx])
+            var activeExitIdxs: [Int] = []
+            var lastEntryIdx: Int?
+            var cooldownUntilIdx = 0
+            var scoringConfig = baseConfig
+            scoringConfig.lookbackDays = lookback
+
+            for dayIdx in startIdx...signalEndIdx {
                 if Task.isCancelled { break }
+                if dayIdx % 16 == 0 { await Task.yield() }
+                if dayIdx > startIdx { signalSlice.append(candles[dayIdx]) }
 
-                let slice = Array(candles[0...dayIdx])
+                let regime = MarketRegimeDetector.detect(from: signalSlice)
+                scoringConfig.minScore = SignalScorer.dynamicMinScore(
+                    for: preset,
+                    regime: regime,
+                    config: scoringConfig
+                )
 
-                guard let signal = SignalScorer.scoreTomorrowBuyOnly(
-                    candles: slice,
-                    preset: preset,
-                    lookback: lookback
+                signalsByDay[dayIdx] = SignalScorer.scoreWithConfig(
+                    candles: signalSlice,
+                    config: scoringConfig,
+                    softMode: true
+                )
+            }
+
+            let hasBuySignalByDay: [Bool] = signalsByDay.map { $0 != nil }
+
+            for dayIdx in startIdx...signalEndIdx {
+                if Task.isCancelled { break }
+                if dayIdx % 16 == 0 { await Task.yield() } // Uzun CPU döngülerinde UI'nin nefes almasını sağlar.
+
+                // Önce kapanan pozisyonları temizle.
+                let hadOpenBeforeCleanup = !activeExitIdxs.isEmpty
+                var closedExitIdxMax: Int?
+                activeExitIdxs.removeAll { exitIdx in
+                    let isClosedBeforeToday = exitIdx <= dayIdx
+                    if isClosedBeforeToday {
+                        if let currentMax = closedExitIdxMax {
+                            closedExitIdxMax = max(currentMax, exitIdx)
+                        } else {
+                            closedExitIdxMax = exitIdx
+                        }
+                    }
+                    return isClosedBeforeToday
+                }
+
+                // Tamamen flat kaldıktan sonra cooldown uygula.
+                if hadOpenBeforeCleanup, activeExitIdxs.isEmpty, let lastClosed = closedExitIdxMax {
+                    cooldownUntilIdx = max(cooldownUntilIdx, lastClosed + exitConfig.cooldownDays)
+                }
+
+                let hasOpenPosition = !activeExitIdxs.isEmpty
+
+                if !hasOpenPosition, dayIdx < cooldownUntilIdx {
+                    let stillBuy = dayIdx < hasBuySignalByDay.count ? hasBuySignalByDay[dayIdx] : false
+                    if !stillBuy {
+                        continue
+                    }
+                }
+
+                // Açık pozisyonda ek alım kuralı.
+                if hasOpenPosition {
+                    switch portfolioConfig.addOnMode {
+                    case .off:
+                        continue
+                    case .free:
+                        break
+                    case .delayed:
+                        guard let lastEntryIdx else { continue }
+                        let waitDays = max(1, portfolioConfig.addOnWaitDays)
+                        if dayIdx < lastEntryIdx + waitDays {
+                            continue
+                        }
+                    }
+                }
+
+                guard let signal = signalsByDay[dayIdx] else { continue }
+
+                // ── Multi-day Trade Simulation ──
+                guard let sim = simulateTrade(
+                    candles: candles,
+                    signalIdx: dayIdx,
+                    exitConfig: exitConfig,
+                    hasBuySignalByDay: hasBuySignalByDay
                 ) else { continue }
 
                 let signalDay = candles[dayIdx]
-                let nextDay = candles[dayIdx + 1]
+                let entryDate = Self.strategyExecutionDate(for: signalDay.date, hour: 17)
+                let exitDate = Self.strategyExecutionDate(for: candles[sim.finalExitIdx].date, hour: 18)
 
                 let trade = BacktestTradeResult(
                     symbol: sym,
-                    signalDate: signalDay.date,
-                    signalClose: signalDay.close,
-                    nextDayClose: nextDay.close,
+                    entryDate: entryDate,
+                    entryPrice: signalDay.close,
+                    exitDate: exitDate,
+                    exitPrice: sim.effectiveExitPrice,
+                    daysHeld: sim.daysHeld,
+                    exitReason: sim.finalExitReason,
                     score: signal.total,
                     quality: signal.quality,
                     reasons: signal.reasons,
                     proximity: signal.breakdown.proximityPct,
                     volumeTrend: signal.breakdown.volumeTrend,
-                    rangeCompression: signal.breakdown.rangeCompression
+                    rangeCompression: signal.breakdown.rangeCompression,
+                    maxDrawdownPct: sim.maxDrawdownPct,
+                    peakReturnPct: sim.peakReturnPct,
+                    tp1Date: sim.tp1ExecutedIdx.map { Self.strategyExecutionDate(for: candles[$0].date, hour: 17) },
+                    tp1Proceeds: sim.tp1Proceeds,
+                    returnPctOverride: sim.realizedReturnPct
                 )
 
                 trades.append(trade)
+                activeExitIdxs.append(sim.finalExitIdx)
+                lastEntryIdx = dayIdx
             }
 
         } catch {
@@ -289,5 +664,251 @@ final class BacktestEngine: ObservableObject {
         }
 
         return trades
+    }
+
+    nonisolated private static func fetchBacktestCandles(
+        yahoo: YahooFinanceService,
+        symbol: String,
+        minCount: Int
+    ) async throws -> [Candle] {
+        if let cached = await CandleCache.shared.load(symbol: symbol), !cached.isEmpty {
+            let trimmed = Array(cached.suffix(max(minCount, 140)))
+            return trimmed
+        }
+
+        let fetched = try await yahoo.fetchDailyCandles(symbol: symbol, range: "6mo")
+        let trimmed = Array(fetched.suffix(max(minCount, 140)))
+        if !trimmed.isEmpty {
+            await CandleCache.shared.save(symbol: symbol, candles: trimmed)
+        }
+        return trimmed
+    }
+
+    nonisolated private static func shouldDeferTodaySignalOutsideExecutionWindow(
+        lastCandleDate: Date?,
+        now: Date = Date(),
+        startHour: Int = 17,
+        closeHour: Int = 18
+    ) -> Bool {
+        guard let lastCandleDate else { return false }
+        let cal = Calendar.current
+        guard cal.isDate(lastCandleDate, inSameDayAs: now) else { return false }
+        let hour = cal.component(.hour, from: now)
+        return hour < startHour || hour >= closeHour
+    }
+
+    nonisolated private static func strategyExecutionDate(
+        for day: Date,
+        hour: Int
+    ) -> Date {
+        Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: day) ?? day
+    }
+
+    // MARK: - Trade Simulation
+
+    private struct SimResult {
+        let effectiveExitPrice: Double
+        let finalExitIdx: Int
+        let finalExitReason: ExitReason
+        let daysHeld: Int
+        let realizedReturnPct: Double
+        let peakReturnPct: Double
+        let maxDrawdownPct: Double
+        let tp1ExecutedIdx: Int?
+        let tp1Proceeds: Double
+    }
+
+    /// Giriş gününden itibaren her günün OHLC'sini kontrol ederek TP/SL/MaxDays çıkışı simüle eder.
+    /// maxDays dolduğunda güncel AL sinyali devam ediyorsa pozisyon kapanmaz; sinyal düşene kadar taşınır.
+    /// - signalIdx: Sinyal günü indexi (giriş fiyatı = candles[signalIdx].close)
+    /// - Returns: nil eğer sinyal gününden sonra yeterli veri yoksa
+    nonisolated private static func simulateTrade(
+        candles: [Candle],
+        signalIdx: Int,
+        exitConfig: BacktestExitConfig,
+        hasBuySignalByDay: [Bool]
+    ) -> SimResult? {
+
+        let entryPrice = candles[signalIdx].close
+        guard entryPrice > 0 else { return nil }
+
+        let tp1Price = entryPrice * (1.0 + exitConfig.tp1Pct / 100.0)
+        let tp2Price = entryPrice * (1.0 + exitConfig.tp2Pct / 100.0)
+        let slPrice = entryPrice * (1.0 - exitConfig.stopLossPct / 100.0)
+
+        var peakPrice = entryPrice
+        var lowestPrice = entryPrice
+        var remainingQty = 1.0
+        var realizedProceeds = 0.0
+        var tp1Executed = false
+        var tp1ExecutedIdx: Int? = nil
+        var tp1Proceeds = 0.0
+        let lastIdx = candles.count - 1
+
+        // Son gün sinyali: ertesi gün mumu yoksa pozisyonu "açık" olarak başlat.
+        if signalIdx >= lastIdx {
+            return SimResult(
+                effectiveExitPrice: entryPrice,
+                finalExitIdx: signalIdx,
+                finalExitReason: .open,
+                daysHeld: 0,
+                realizedReturnPct: 0,
+                peakReturnPct: 0,
+                maxDrawdownPct: 0,
+                tp1ExecutedIdx: nil,
+                tp1Proceeds: 0
+            )
+        }
+
+        for dayIdx in (signalIdx + 1)...lastIdx {
+            let candle = candles[dayIdx]
+            let daysHeld = dayIdx - signalIdx
+
+            // Track peak & trough
+            if candle.high > peakPrice { peakPrice = candle.high }
+            if candle.low < lowestPrice { lowestPrice = candle.low }
+
+            // ── 1. STOP LOSS (önce kontrol — kötü senaryo varsayımı) ──
+
+            // Gap down: açılış SL'nin altında → open fiyatından çık
+            if candle.open <= slPrice {
+                realizedProceeds += remainingQty * candle.open
+                let peakRet = (peakPrice - entryPrice) / entryPrice * 100
+                let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
+                return SimResult(
+                    effectiveExitPrice: realizedProceeds,
+                    finalExitIdx: dayIdx,
+                    finalExitReason: .stopLoss,
+                    daysHeld: daysHeld,
+                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    peakReturnPct: peakRet,
+                    maxDrawdownPct: maxDD,
+                    tp1ExecutedIdx: tp1ExecutedIdx,
+                    tp1Proceeds: tp1Proceeds
+                )
+            }
+
+            // Gün içi SL: low SL'ye değdi → SL fiyatından çık
+            if candle.low <= slPrice {
+                realizedProceeds += remainingQty * slPrice
+                let peakRet = (peakPrice - entryPrice) / entryPrice * 100
+                let maxDD = (slPrice - entryPrice) / entryPrice * 100
+                return SimResult(
+                    effectiveExitPrice: realizedProceeds,
+                    finalExitIdx: dayIdx,
+                    finalExitReason: .stopLoss,
+                    daysHeld: daysHeld,
+                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    peakReturnPct: peakRet,
+                    maxDrawdownPct: maxDD,
+                    tp1ExecutedIdx: tp1ExecutedIdx,
+                    tp1Proceeds: tp1Proceeds
+                )
+            }
+
+            // ── 2. TAKE PROFIT (kademeli TP1 / TP2) ──
+            if !tp1Executed {
+                if candle.open >= tp1Price {
+                    let tp1Qty = remainingQty * (exitConfig.tp1SellPercent / 100.0)
+                    let proceeds = tp1Qty * candle.open
+                    realizedProceeds += proceeds
+                    tp1Proceeds += proceeds
+                    remainingQty -= tp1Qty
+                    tp1Executed = true
+                    tp1ExecutedIdx = dayIdx
+                } else if candle.high >= tp1Price {
+                    let tp1Qty = remainingQty * (exitConfig.tp1SellPercent / 100.0)
+                    let proceeds = tp1Qty * tp1Price
+                    realizedProceeds += proceeds
+                    tp1Proceeds += proceeds
+                    remainingQty -= tp1Qty
+                    tp1Executed = true
+                    tp1ExecutedIdx = dayIdx
+                }
+            }
+
+            // TP1 alındığı gün TP2 kapatılmaz; TP2 en erken sonraki günlerde değerlendirilir.
+            if tp1ExecutedIdx == dayIdx {
+                continue
+            }
+
+            // Gap up: açılış TP2 üzerinde → kalan lotları open fiyatından çık
+            if candle.open >= tp2Price {
+                realizedProceeds += remainingQty * candle.open
+                let peakRet = (candle.open - entryPrice) / entryPrice * 100
+                let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
+                return SimResult(
+                    effectiveExitPrice: realizedProceeds,
+                    finalExitIdx: dayIdx,
+                    finalExitReason: .takeProfit,
+                    daysHeld: daysHeld,
+                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    peakReturnPct: peakRet,
+                    maxDrawdownPct: maxDD,
+                    tp1ExecutedIdx: tp1ExecutedIdx,
+                    tp1Proceeds: tp1Proceeds
+                )
+            }
+
+            // Gün içi TP2: high TP2'ye değdi → kalan lotları TP2 fiyatından çık
+            if candle.high >= tp2Price {
+                realizedProceeds += remainingQty * tp2Price
+                let peakRet = (peakPrice - entryPrice) / entryPrice * 100
+                let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
+                return SimResult(
+                    effectiveExitPrice: realizedProceeds,
+                    finalExitIdx: dayIdx,
+                    finalExitReason: .takeProfit,
+                    daysHeld: daysHeld,
+                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    peakReturnPct: peakRet,
+                    maxDrawdownPct: maxDD,
+                    tp1ExecutedIdx: tp1ExecutedIdx,
+                    tp1Proceeds: tp1Proceeds
+                )
+            }
+
+            // ── 3. MaxDays (AL sinyali sürüyorsa taşı) ──
+            if daysHeld >= exitConfig.maxHoldDays {
+                let stillBuy = dayIdx < hasBuySignalByDay.count ? hasBuySignalByDay[dayIdx] : false
+                if !stillBuy {
+                    realizedProceeds += remainingQty * candle.close
+                    let peakRet = (peakPrice - entryPrice) / entryPrice * 100
+                    let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
+                    return SimResult(
+                        effectiveExitPrice: realizedProceeds,
+                        finalExitIdx: dayIdx,
+                        finalExitReason: .maxDays,
+                        daysHeld: daysHeld,
+                        realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                        peakReturnPct: peakRet,
+                        maxDrawdownPct: maxDD,
+                        tp1ExecutedIdx: tp1ExecutedIdx,
+                        tp1Proceeds: tp1Proceeds
+                    )
+                }
+            }
+
+        }
+
+        // Veri sonuna kadar TP/SL gelmedi ve AL sinyali sürdü/yeterli çıkış koşulu oluşmadıysa pozisyon açık kalır.
+        let finalIdx = lastIdx
+        let finalClose = candles[finalIdx].close
+        let daysHeld = finalIdx - signalIdx
+        realizedProceeds += remainingQty * finalClose
+        let peakRet = (peakPrice - entryPrice) / entryPrice * 100
+        let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
+
+        return SimResult(
+            effectiveExitPrice: realizedProceeds,
+            finalExitIdx: finalIdx,
+            finalExitReason: .open,
+            daysHeld: daysHeld,
+            realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+            peakReturnPct: peakRet,
+            maxDrawdownPct: maxDD,
+            tp1ExecutedIdx: tp1ExecutedIdx,
+            tp1Proceeds: tp1Proceeds
+        )
     }
 }

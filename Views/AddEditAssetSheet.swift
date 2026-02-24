@@ -5,6 +5,7 @@ struct AddEditAssetSheet: View {
     let asset: Asset?
     let onSave: (Asset) -> Void
     let onDelete: ((Asset) -> Void)?
+    let onSell: ((Asset, Double) -> Bool)?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -18,6 +19,7 @@ struct AddEditAssetSheet: View {
 
     @State private var quantityText: String = ""
     @State private var avgCostText: String = ""
+    @State private var sellQuantityText: String = ""
 
     @State private var quantityStep: Double = 1
 
@@ -131,11 +133,13 @@ struct AddEditAssetSheet: View {
     init(
         asset: Asset?,
         onSave: @escaping (Asset) -> Void,
-        onDelete: ((Asset) -> Void)? = nil
+        onDelete: ((Asset) -> Void)? = nil,
+        onSell: ((Asset, Double) -> Bool)? = nil
     ) {
         self.asset = asset
         self.onSave = onSave
         self.onDelete = onDelete
+        self.onSell = onSell
     }
 
     var body: some View {
@@ -153,6 +157,7 @@ struct AddEditAssetSheet: View {
                         TVCard { detailsCard }
 
                         if asset != nil {
+                            TVCard { sellCard }
                             TVCard { deleteCard }
                         }
 
@@ -239,7 +244,7 @@ struct AddEditAssetSheet: View {
                 }
             }
             .pickerStyle(.segmented)
-            .onChange(of: type) {
+            .onChangeCompat(of: type) { _ in
                 resetForTypeChange()
                 applyPresetIfNeeded()
             }
@@ -264,7 +269,7 @@ struct AddEditAssetSheet: View {
                 }
             }
             .pickerStyle(.menu)
-            .onChange(of: presetID) {
+            .onChangeCompat(of: presetID) { _ in
                 applyPresetIfNeeded()
             }
 
@@ -323,6 +328,40 @@ struct AddEditAssetSheet: View {
         .buttonStyle(.plain)
         .disabled(onDelete == nil)
         .opacity(onDelete == nil ? 0.5 : 1)
+    }
+
+    private var sellCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Varlık Sat")
+                .font(.caption)
+                .foregroundStyle(TVTheme.subtext)
+
+            if let a = asset {
+                Text("Mevcut miktar: \(fmtTR(a.quantity))")
+                    .font(.caption2)
+                    .foregroundStyle(TVTheme.subtext)
+            }
+
+            TextField("Satılacak miktar", text: $sellQuantityText)
+                .keyboardType(.decimalPad)
+                .textFieldStyle(.roundedBorder)
+
+            Button(role: .destructive) {
+                sellNow()
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.down.circle.fill")
+                    Text("Parçalı Satış Yap")
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.orange)
+            .disabled(onSell == nil)
+            .opacity(onSell == nil ? 0.5 : 1)
+        }
     }
 
     private var quantityEditor: some View {
@@ -420,6 +459,7 @@ struct AddEditAssetSheet: View {
             symbol = ""
             quantityText = ""
             avgCostText = ""
+            sellQuantityText = ""
             quantityStep = 1
             return
         }
@@ -432,6 +472,7 @@ struct AddEditAssetSheet: View {
         symbol = a.symbol
         quantityText = fmtTR(a.quantity)
         avgCostText = a.avgCostTRY.map(fmtTR) ?? ""
+        sellQuantityText = ""
         quantityStep = 1
     }
 
@@ -519,6 +560,28 @@ struct AddEditAssetSheet: View {
         let current = qty ?? 0
         let next = max(0, current + delta)
         quantityText = fmtTR(next)
+    }
+
+    private func sellNow() {
+        guard let a = asset else { return }
+        guard let onSell else {
+            alert = .init(title: "Satış yok", message: "Bu varlık için satış işlemi açılamadı.")
+            return
+        }
+        guard let sellQty = parseDoubleTR(sellQuantityText), sellQty > 0 else {
+            alert = .init(title: "Hatalı miktar", message: "Satılacak miktarı doğru gir.")
+            return
+        }
+        guard sellQty <= a.quantity + 0.000_000_1 else {
+            alert = .init(title: "Yetersiz miktar", message: "Satış miktarı eldeki miktardan büyük olamaz.")
+            return
+        }
+
+        if onSell(a, sellQty) {
+            dismiss()
+        } else {
+            alert = .init(title: "Satış yapılamadı", message: "İşlem sırasında bir sorun oluştu.")
+        }
     }
 
     // MARK: - Helpers

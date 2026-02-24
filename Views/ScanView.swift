@@ -9,6 +9,11 @@ struct ScanView: View {
     @State private var showInfo: Bool = false
     @State private var showFilters: Bool = false
 
+    private enum NavRoute: Hashable {
+        case backtest
+        case detail(StockDetailRoute)
+    }
+
     // Cache
     private var sortedAndFilteredResults: [ScanResult] {
         sortedResults(vm.results)
@@ -50,6 +55,14 @@ struct ScanView: View {
         .sheet(isPresented: $showFilters) {
             ScanFilterSheet(vm: vm)
         }
+        .navigationDestination(for: NavRoute.self) { route in
+            switch route {
+            case .backtest:
+                BacktestView(engine: engine)
+            case .detail(let detailRoute):
+                StockDetailView(route: detailRoute)
+            }
+        }
         .tvNavStyle()
     }
 
@@ -77,9 +90,7 @@ struct ScanView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 14) {
 
-                    NavigationLink {
-                        BacktestView(engine: engine)
-                    } label: {
+                    NavigationLink(value: NavRoute.backtest) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
                             .font(.body.weight(.semibold))
                             .foregroundStyle(TVTheme.text)
@@ -133,9 +144,6 @@ struct ScanView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .onChange(of: vm.selectedIndex) {
-                    vm.loadLastResultsForSelectedIndex()
-                }
 
                 HStack(spacing: 10) {
                     TVChip("Preset", systemImage: "slider.horizontal.3")
@@ -233,9 +241,7 @@ struct ScanView: View {
                     .listRowSeparator(.hidden)
 
                 ForEach(buyResults, id: \.symbol) { r in
-                    NavigationLink {
-                        StockDetailView(route: .snapshot(r))
-                    } label: {
+                    NavigationLink(value: NavRoute.detail(.snapshot(r))) {
                         ScanRowTV(r: r)
                     }
                     .listRowInsets(rowInsets)
@@ -332,6 +338,10 @@ struct ScanView: View {
 
 private struct ScanRowTV: View {
     let r: ScanResult
+    @AppStorage(BacktestKeys.takeProfitPct) private var takeProfitPct: Double = 20.0
+    @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
+    @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
+    @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
 
     private var changeText: String { String(format: "%+.2f%%", r.changePct) }
     private var qualityText: String { r.uiQuality }
@@ -359,7 +369,26 @@ private struct ScanRowTV: View {
         }
     }
 
+    private func qualityMultiplier(_ q: String) -> Double {
+        switch q {
+        case "A+": return 1.15
+        case "A":  return 1.00
+        case "B":  return 0.85
+        case "C":  return 0.70
+        default:   return 0.55
+        }
+    }
+
     var body: some View {
+        let cfg = BacktestExitConfig(
+            takeProfitPct: takeProfitPct,
+            stopLossPct: stopLossPct,
+            maxHoldDays: Int(maxHoldDays),
+            cooldownDays: Int(cooldownDays)
+        )
+        let signalDate = r.lastDate
+        let projectedExit = Calendar.current.date(byAdding: .day, value: cfg.maxHoldDays, to: signalDate) ?? signalDate
+
         VStack(alignment: .leading, spacing: 10) {
 
             HStack(alignment: .firstTextBaseline) {
@@ -398,6 +427,16 @@ private struct ScanRowTV: View {
                     .foregroundStyle(r.changePct >= 0 ? TVTheme.up : TVTheme.down)
             }
 
+            HStack(spacing: 10) {
+                Text("Sinyal: \(signalDate.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption2)
+                    .foregroundStyle(TVTheme.subtext)
+                Text("Max Çıkış: \(projectedExit.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption2)
+                    .foregroundStyle(TVTheme.subtext)
+                Spacer()
+            }
+
             if let metaLine {
                 Text(metaLine)
                     .font(.system(size: 12, weight: .semibold))
@@ -405,6 +444,9 @@ private struct ScanRowTV: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
+
+            // ── Çıkış Stratejisi (TP/SL hedefleri) ──
+            exitTargetsRow
 
             scoreBar
 
@@ -424,6 +466,90 @@ private struct ScanRowTV: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(TVTheme.stroke, lineWidth: 1)
         )
+    }
+
+    // ── Exit Targets (TP/SL/R:R) ──
+    private var exitTargetsRow: some View {
+        let price = r.lastClose
+        let cfg = BacktestExitConfig(
+            takeProfitPct: takeProfitPct,
+            stopLossPct: stopLossPct,
+            maxHoldDays: Int(maxHoldDays),
+            cooldownDays: Int(cooldownDays)
+        )
+
+        let tpPrice = price * (1.0 + cfg.takeProfitPct / 100.0)
+        let slPrice = price * (1.0 - cfg.stopLossPct / 100.0)
+        let rr = cfg.stopLossPct > 0 ? cfg.takeProfitPct / cfg.stopLossPct : 0
+        let expectedR = rr * qualityMultiplier(qualityText)
+
+        return HStack(spacing: 6) {
+            // TP
+            HStack(spacing: 3) {
+                Text("🎯")
+                    .font(.system(size: 9))
+                Text(String(format: "%.2f", tpPrice))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(TVTheme.up)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(TVTheme.up.opacity(0.10))
+            .clipShape(Capsule())
+
+            // SL
+            HStack(spacing: 3) {
+                Text("🛑")
+                    .font(.system(size: 9))
+                Text(String(format: "%.2f", slPrice))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(TVTheme.down)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(TVTheme.down.opacity(0.10))
+            .clipShape(Capsule())
+
+            // R:R
+            HStack(spacing: 3) {
+                Text("⚖️")
+                    .font(.system(size: 9))
+                Text(String(format: "1:%.1f", rr))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(rr >= 2.5 ? TVTheme.up : (rr >= 1.5 ? .orange : TVTheme.down))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(TVTheme.surface2)
+            .clipShape(Capsule())
+
+            HStack(spacing: 3) {
+                Text("📈")
+                    .font(.system(size: 9))
+                Text(String(format: "ER %.2fR", expectedR))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(expectedR >= 2.0 ? TVTheme.up : (expectedR >= 1.2 ? .orange : TVTheme.down))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(TVTheme.surface2)
+            .clipShape(Capsule())
+
+            // Max days
+            HStack(spacing: 3) {
+                Text("⏰")
+                    .font(.system(size: 9))
+                Text("\(cfg.maxHoldDays)g")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(TVTheme.subtext)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(TVTheme.surface2)
+            .clipShape(Capsule())
+
+            Spacer()
+        }
     }
 
     private var scoreBar: some View {

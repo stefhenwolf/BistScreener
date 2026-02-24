@@ -77,11 +77,13 @@ extension String {
     /// - Behavior:
     ///   - trims whitespace/newlines
     ///   - uppercases
-    ///   - if no market suffix is present, appends `.IS`
+    ///   - global Yahoo sembolleri (=, -, ^, /) olduğu gibi bırakır
+    ///   - diğerlerinde market suffix yoksa `.IS` ekler
     func normalizedBISTSymbol() -> String {
         let t = trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         guard !t.isEmpty else { return "" }
-        if t.contains(".") { return t }
+        let isGlobalYahoo = t.contains("=") || t.contains("-") || t.contains("^") || t.contains("/")
+        if t.contains(".") || isGlobalYahoo { return t }
         return t + ".IS"
     }
 }

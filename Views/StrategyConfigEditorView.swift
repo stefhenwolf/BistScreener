@@ -17,6 +17,7 @@ struct StrategyConfigEditorView: View {
                 clvCard
                 compressionCard
                 todayChangeCard
+                regimeCard
                 weightsCard
                 scoreCard
                 qualityBandsCard
@@ -84,9 +85,9 @@ struct StrategyConfigEditorView: View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
                 sectionTitle("Kırılıma Yakınlık (Proximity)")
-                doubleSliderRow("Min Proximity", value: $cfg.minProximity, range: 0.90...0.99, step: 0.001)
-                doubleSliderRow("Max Proximity", value: $cfg.maxProximity, range: 0.95...1.05, step: 0.001)
-                hint("close / refLevel aralığı. 1.0 = kırılım seviyesi.")
+                doubleSliderRow("Min Proximity", value: $cfg.minProximity, range: 0.85...0.99, step: 0.001)
+                doubleSliderRow("Max Proximity", value: $cfg.maxProximity, range: 0.95...1.10, step: 0.001)
+                hint("close / refLevel aralığı. 1.0 = kırılım. v2: softMode'da hard guard değil, referans.")
             }
         }
     }
@@ -95,7 +96,7 @@ struct StrategyConfigEditorView: View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
                 sectionTitle("Hacim")
-                doubleSliderRow("Min Value Multiple", value: $cfg.minValueMultiple, range: 0.3...3.0, step: 0.05)
+                doubleSliderRow("Min Value Multiple", value: $cfg.minValueMultiple, range: 0.0...3.0, step: 0.05)
                 doubleSliderRow("Min Volume Trend", value: $cfg.minVolumeTrend, range: 0.0...3.0, step: 0.05)
                 hint("ValueMultiple = (today value) / (avg20 value). VolumeTrend = (son 5 gün avg vol) / (önceki 10 gün avg vol)")
             }
@@ -116,7 +117,7 @@ struct StrategyConfigEditorView: View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
                 sectionTitle("Sıkışma (Range Compression)")
-                doubleSliderRow("Max Range Compression", value: $cfg.maxRangeCompression, range: 0.6...2.0, step: 0.05)
+                doubleSliderRow("Max Range Compression", value: $cfg.maxRangeCompression, range: 0.6...3.0, step: 0.05)
                 hint("recentRange / olderRange. Küçük = daha sıkışmış.")
             }
         }
@@ -132,6 +133,19 @@ struct StrategyConfigEditorView: View {
         }
     }
 
+    private var regimeCard: some View {
+        TVCard {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("Rejim Eşiği (Dinamik Min Score)")
+                StepperRowInt(title: "Bull Delta", value: $cfg.regimeBullDelta, range: -10...15, step: 1)
+                StepperRowInt(title: "Sideways Delta", value: $cfg.regimeSidewaysDelta, range: -10...20, step: 1)
+                StepperRowInt(title: "Bear Delta", value: $cfg.regimeBearDelta, range: -10...30, step: 1)
+                StepperRowInt(title: "Bear Min Score", value: $cfg.regimeBearMinScore, range: 50...95, step: 1)
+                hint("Efektif eşik = preset minScore + rejim delta. Bear için ayrıca taban skor uygulanır.")
+            }
+        }
+    }
+
     private var weightsCard: some View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -140,13 +154,14 @@ struct StrategyConfigEditorView: View {
                 doubleSliderRow("w VolumeTrend", value: $cfg.weightVolumeTrend, range: 0...60, step: 1)
                 doubleSliderRow("w CLV", value: $cfg.weightCLV, range: 0...60, step: 1)
                 doubleSliderRow("w Compression", value: $cfg.weightCompression, range: 0...60, step: 1)
+                doubleSliderRow("w Trend (EMA)", value: $cfg.weightTrend, range: 0...30, step: 1)
 
-                let sum = cfg.weightProximity + cfg.weightVolumeTrend + cfg.weightCLV + cfg.weightCompression
+                let sum = cfg.weightProximity + cfg.weightVolumeTrend + cfg.weightCLV + cfg.weightCompression + cfg.weightTrend
                 Text("Toplam: \(Int(sum))")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(sum >= 95 && sum <= 105 ? TVTheme.up : TVTheme.down)
 
-                hint("SignalScorer içinde normalize ediliyor; 100 şart değil ama 100'e yakın tutmak iyi.")
+                hint("v2: Proximity=35, Vol=20, CLV=20, Comp=15, Trend=10. Normalize ediliyor.")
             }
         }
     }
@@ -157,6 +172,7 @@ struct StrategyConfigEditorView: View {
                 sectionTitle("Eşik")
                 StepperRowInt(title: "Min Score", value: $cfg.minScore, range: 0...100, step: 1)
                 StepperRowInt(title: "Lookback Days", value: $cfg.lookbackDays, range: 10...60, step: 1)
+                hint("Lookback Days yalnızca Normal preset'te aktif. Relaxed/Strict preset değerini kullanır.")
             }
         }
     }

@@ -32,6 +32,9 @@ struct FormationsView: View {
             vm.switchIndex(newValue)
             // ✅ Kullanıcı "Yeniden Tara" butonuna basmadan tarama başlamasın.
         }
+        .navigationDestination(for: StockDetailRoute.self) { route in
+            StockDetailView(route: route)
+        }
     }
 
     private var content: some View {
@@ -245,9 +248,7 @@ struct FormationsView: View {
             let sortedRows = sortRows(rows)
 
             ForEach(sortedRows, id: \.0.id) { (r, pScore) in
-                NavigationLink {
-                    StockDetailView(route: .snapshot(r))
-                } label: {
+                NavigationLink(value: StockDetailRoute.snapshot(r)) {
                     FormationRowPro(result: r, pattern: p, patternScore: pScore)
                         .foregroundStyle(TVTheme.text)
                 }
