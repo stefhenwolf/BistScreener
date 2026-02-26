@@ -24,6 +24,12 @@ struct BacktestExitConfig: Codable, Equatable {
     /// Aynı hisse için yeniden giriş bekleme süresi (iş günü)
     var cooldownDays: Int = 3
 
+    /// Komisyon (tek yön, bps). 10 bps = %0.10
+    var commissionBps: Double = 10.0
+
+    /// Slippage (tek yön, bps). 5 bps = %0.05
+    var slippageBps: Double = 5.0
+
     /// Eski tek TP alanı uyumluluğu (TP2 = ana hedef)
     var takeProfitPct: Double {
         get { tp2Pct }
@@ -38,6 +44,8 @@ struct BacktestExitConfig: Codable, Equatable {
         case stopLossPct
         case maxHoldDays
         case cooldownDays
+        case commissionBps
+        case slippageBps
     }
 
     init() {}
@@ -48,7 +56,9 @@ struct BacktestExitConfig: Codable, Equatable {
         tp1SellPercent: Double = 50.0,
         stopLossPct: Double = 6.0,
         maxHoldDays: Int = 30,
-        cooldownDays: Int = 3
+        cooldownDays: Int = 3,
+        commissionBps: Double = 10.0,
+        slippageBps: Double = 5.0
     ) {
         self.tp1Pct = tp1Pct
         self.tp2Pct = tp2Pct
@@ -56,6 +66,8 @@ struct BacktestExitConfig: Codable, Equatable {
         self.stopLossPct = stopLossPct
         self.maxHoldDays = maxHoldDays
         self.cooldownDays = cooldownDays
+        self.commissionBps = commissionBps
+        self.slippageBps = slippageBps
         normalize()
     }
 
@@ -68,6 +80,8 @@ struct BacktestExitConfig: Codable, Equatable {
         stopLossPct = try c.decodeIfPresent(Double.self, forKey: .stopLossPct) ?? 6.0
         maxHoldDays = try c.decodeIfPresent(Int.self, forKey: .maxHoldDays) ?? 30
         cooldownDays = try c.decodeIfPresent(Int.self, forKey: .cooldownDays) ?? 3
+        commissionBps = try c.decodeIfPresent(Double.self, forKey: .commissionBps) ?? 10.0
+        slippageBps = try c.decodeIfPresent(Double.self, forKey: .slippageBps) ?? 5.0
         normalize()
     }
 
@@ -80,6 +94,8 @@ struct BacktestExitConfig: Codable, Equatable {
         try c.encode(stopLossPct, forKey: .stopLossPct)
         try c.encode(maxHoldDays, forKey: .maxHoldDays)
         try c.encode(cooldownDays, forKey: .cooldownDays)
+        try c.encode(commissionBps, forKey: .commissionBps)
+        try c.encode(slippageBps, forKey: .slippageBps)
     }
 
     mutating func normalize() {
@@ -92,6 +108,8 @@ struct BacktestExitConfig: Codable, Equatable {
         stopLossPct = min(max(stopLossPct, 1), 25)
         maxHoldDays = min(max(maxHoldDays, 1), 180)
         cooldownDays = min(max(cooldownDays, 0), 30)
+        commissionBps = min(max(commissionBps, 0), 100)
+        slippageBps = min(max(slippageBps, 0), 100)
     }
 
     init(
@@ -778,6 +796,19 @@ final class BacktestEngine: ObservableObject {
         let tp1Proceeds: Double
     }
 
+    nonisolated private static func applyTransactionCosts(
+        grossPrice: Double,
+        isBuy: Bool,
+        exitConfig: BacktestExitConfig
+    ) -> Double {
+        let totalBps = (exitConfig.commissionBps + exitConfig.slippageBps) / 10_000.0
+        if isBuy {
+            return grossPrice * (1.0 + totalBps)
+        } else {
+            return grossPrice * (1.0 - totalBps)
+        }
+    }
+
     /// Giriş gününden itibaren her günün OHLC'sini kontrol ederek TP/SL/MaxDays çıkışı simüle eder.
     /// maxDays dolduğunda güncel AL sinyali devam ediyorsa pozisyon kapanmaz; sinyal düşene kadar taşınır.
     /// - signalIdx: Sinyal günü indexi (giriş fiyatı = candles[signalIdx].close)
@@ -791,6 +822,12 @@ final class BacktestEngine: ObservableObject {
 
         let entryPrice = candles[signalIdx].close
         guard entryPrice > 0 else { return nil }
+
+        let netEntryPrice = applyTransactionCosts(
+            grossPrice: entryPrice,
+            isBuy: true,
+            exitConfig: exitConfig
+        )
 
         let tp1Price = entryPrice * (1.0 + exitConfig.tp1Pct / 100.0)
         let tp2Price = entryPrice * (1.0 + exitConfig.tp2Pct / 100.0)
@@ -832,7 +869,8 @@ final class BacktestEngine: ObservableObject {
 
             // Gap down: açılış SL'nin altında → open fiyatından çık
             if candle.open <= slPrice {
-                realizedProceeds += remainingQty * candle.open
+                let netExit = applyTransactionCosts(grossPrice: candle.open, isBuy: false, exitConfig: exitConfig)
+                realizedProceeds += remainingQty * netExit
                 let peakRet = (peakPrice - entryPrice) / entryPrice * 100
                 let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
                 return SimResult(
@@ -840,7 +878,7 @@ final class BacktestEngine: ObservableObject {
                     finalExitIdx: dayIdx,
                     finalExitReason: .stopLoss,
                     daysHeld: daysHeld,
-                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
                     peakReturnPct: peakRet,
                     maxDrawdownPct: maxDD,
                     tp1ExecutedIdx: tp1ExecutedIdx,
@@ -850,7 +888,8 @@ final class BacktestEngine: ObservableObject {
 
             // Gün içi SL: low SL'ye değdi → SL fiyatından çık
             if candle.low <= slPrice {
-                realizedProceeds += remainingQty * slPrice
+                let netExit = applyTransactionCosts(grossPrice: slPrice, isBuy: false, exitConfig: exitConfig)
+                realizedProceeds += remainingQty * netExit
                 let peakRet = (peakPrice - entryPrice) / entryPrice * 100
                 let maxDD = (slPrice - entryPrice) / entryPrice * 100
                 return SimResult(
@@ -858,7 +897,7 @@ final class BacktestEngine: ObservableObject {
                     finalExitIdx: dayIdx,
                     finalExitReason: .stopLoss,
                     daysHeld: daysHeld,
-                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
                     peakReturnPct: peakRet,
                     maxDrawdownPct: maxDD,
                     tp1ExecutedIdx: tp1ExecutedIdx,
@@ -870,7 +909,8 @@ final class BacktestEngine: ObservableObject {
             if !tp1Executed {
                 if candle.open >= tp1Price {
                     let tp1Qty = remainingQty * (exitConfig.tp1SellPercent / 100.0)
-                    let proceeds = tp1Qty * candle.open
+                    let netExit = applyTransactionCosts(grossPrice: candle.open, isBuy: false, exitConfig: exitConfig)
+                    let proceeds = tp1Qty * netExit
                     realizedProceeds += proceeds
                     tp1Proceeds += proceeds
                     remainingQty -= tp1Qty
@@ -878,7 +918,8 @@ final class BacktestEngine: ObservableObject {
                     tp1ExecutedIdx = dayIdx
                 } else if candle.high >= tp1Price {
                     let tp1Qty = remainingQty * (exitConfig.tp1SellPercent / 100.0)
-                    let proceeds = tp1Qty * tp1Price
+                    let netExit = applyTransactionCosts(grossPrice: tp1Price, isBuy: false, exitConfig: exitConfig)
+                    let proceeds = tp1Qty * netExit
                     realizedProceeds += proceeds
                     tp1Proceeds += proceeds
                     remainingQty -= tp1Qty
@@ -894,7 +935,8 @@ final class BacktestEngine: ObservableObject {
 
             // Gap up: açılış TP2 üzerinde → kalan lotları open fiyatından çık
             if candle.open >= tp2Price {
-                realizedProceeds += remainingQty * candle.open
+                let netExit = applyTransactionCosts(grossPrice: candle.open, isBuy: false, exitConfig: exitConfig)
+                realizedProceeds += remainingQty * netExit
                 let peakRet = (candle.open - entryPrice) / entryPrice * 100
                 let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
                 return SimResult(
@@ -902,7 +944,7 @@ final class BacktestEngine: ObservableObject {
                     finalExitIdx: dayIdx,
                     finalExitReason: .takeProfit,
                     daysHeld: daysHeld,
-                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
                     peakReturnPct: peakRet,
                     maxDrawdownPct: maxDD,
                     tp1ExecutedIdx: tp1ExecutedIdx,
@@ -912,7 +954,8 @@ final class BacktestEngine: ObservableObject {
 
             // Gün içi TP2: high TP2'ye değdi → kalan lotları TP2 fiyatından çık
             if candle.high >= tp2Price {
-                realizedProceeds += remainingQty * tp2Price
+                let netExit = applyTransactionCosts(grossPrice: tp2Price, isBuy: false, exitConfig: exitConfig)
+                realizedProceeds += remainingQty * netExit
                 let peakRet = (peakPrice - entryPrice) / entryPrice * 100
                 let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
                 return SimResult(
@@ -920,7 +963,7 @@ final class BacktestEngine: ObservableObject {
                     finalExitIdx: dayIdx,
                     finalExitReason: .takeProfit,
                     daysHeld: daysHeld,
-                    realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                    realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
                     peakReturnPct: peakRet,
                     maxDrawdownPct: maxDD,
                     tp1ExecutedIdx: tp1ExecutedIdx,
@@ -932,7 +975,8 @@ final class BacktestEngine: ObservableObject {
             if daysHeld >= exitConfig.maxHoldDays {
                 let stillBuy = dayIdx < hasBuySignalByDay.count ? hasBuySignalByDay[dayIdx] : false
                 if !stillBuy {
-                    realizedProceeds += remainingQty * candle.close
+                    let netExit = applyTransactionCosts(grossPrice: candle.close, isBuy: false, exitConfig: exitConfig)
+                    realizedProceeds += remainingQty * netExit
                     let peakRet = (peakPrice - entryPrice) / entryPrice * 100
                     let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
                     return SimResult(
@@ -940,7 +984,7 @@ final class BacktestEngine: ObservableObject {
                         finalExitIdx: dayIdx,
                         finalExitReason: .maxDays,
                         daysHeld: daysHeld,
-                        realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+                        realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
                         peakReturnPct: peakRet,
                         maxDrawdownPct: maxDD,
                         tp1ExecutedIdx: tp1ExecutedIdx,
@@ -955,7 +999,8 @@ final class BacktestEngine: ObservableObject {
         let finalIdx = lastIdx
         let finalClose = candles[finalIdx].close
         let daysHeld = finalIdx - signalIdx
-        realizedProceeds += remainingQty * finalClose
+        let netExit = applyTransactionCosts(grossPrice: finalClose, isBuy: false, exitConfig: exitConfig)
+        realizedProceeds += remainingQty * netExit
         let peakRet = (peakPrice - entryPrice) / entryPrice * 100
         let maxDD = (lowestPrice - entryPrice) / entryPrice * 100
 
@@ -964,7 +1009,7 @@ final class BacktestEngine: ObservableObject {
             finalExitIdx: finalIdx,
             finalExitReason: .open,
             daysHeld: daysHeld,
-            realizedReturnPct: ((realizedProceeds - entryPrice) / entryPrice) * 100,
+            realizedReturnPct: ((realizedProceeds - netEntryPrice) / netEntryPrice) * 100,
             peakReturnPct: peakRet,
             maxDrawdownPct: maxDD,
             tp1ExecutedIdx: tp1ExecutedIdx,
