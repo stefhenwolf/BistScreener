@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
+    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
+    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
 
     let hasPendingChanges: Bool
     let onApply: () -> Void
@@ -83,6 +85,32 @@ struct SettingsView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
+
+                                Divider().opacity(0.25)
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("İşlem Maliyeti (BPS)")
+                                        .font(.caption)
+                                        .foregroundStyle(TVTheme.subtext)
+
+                                    HStack(spacing: 8) {
+                                        Button("LargeCap 8/4") {
+                                            commissionBps = 8
+                                            slippageBps = 4
+                                        }
+                                        .buttonStyle(.bordered)
+
+                                        Button("Mid/Small 12/8") {
+                                            commissionBps = 12
+                                            slippageBps = 8
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+
+                                    Text("Aktif: Komisyon \(Int(commissionBps)) bps, Slippage \(Int(slippageBps)) bps (tek yön)")
+                                        .font(.footnote)
+                                        .foregroundStyle(TVTheme.subtext)
+                                }
 
                                 Divider().opacity(0.25)
 
