@@ -22,6 +22,7 @@ struct CandlestickChartView: View {
     private let minBarWidth: CGFloat = 6
     private let maxBarWidth: CGFloat = 14
     @State private var zoomScale: CGFloat = 1.0
+    @State private var verticalPan: CGFloat = 0
     private let barSpacing: CGFloat = 4
     private let horizontalPadding: CGFloat = 12
     private let axisHeight: CGFloat = 28
@@ -51,7 +52,9 @@ struct CandlestickChartView: View {
 
             let y: (Double) -> CGFloat = { price in
                 let p = (price - minL) / span
-                return chartHeight - CGFloat(p) * chartHeight
+                let base = chartHeight - CGFloat(p) * chartHeight
+                let clampedPan = min(max(verticalPan, -chartHeight * 0.35), chartHeight * 0.35)
+                return base + clampedPan
             }
 
             if fitToWidth {
@@ -179,6 +182,17 @@ struct CandlestickChartView: View {
                     .clipShape(Capsule())
                     .padding(.bottom, 2)
             }
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    if abs(value.translation.height) > abs(value.translation.width) {
+                        verticalPan = value.translation.height
+                    }
+                }
+        )
+        .onTapGesture(count: 2) {
+            verticalPan = 0
         }
         .onAppear {
             if selected == nil { selected = candles.last }
