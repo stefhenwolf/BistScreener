@@ -138,15 +138,6 @@ struct CandlestickChartView: View {
                     .onChange(of: candles.count) { _ in
                         scrollToLatest(proxy)
                     }
-                    .onChange(of: selectedDate) { _ in
-                        if let idx = candles.firstIndex(where: { $0.date == selectedDate }) {
-                            DispatchQueue.main.async {
-                                proxy.scrollTo("candle-\(idx)", anchor: .center)
-                            }
-                        } else {
-                            scrollToLatest(proxy)
-                        }
-                    }
                 }
                 .simultaneousGesture(
                     MagnificationGesture()
