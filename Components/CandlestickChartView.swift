@@ -140,7 +140,7 @@ struct CandlestickChartView: View {
                         .onChanged { value in
                             if abs(value.translation.width) >= abs(value.translation.height) {
                                 let unit = max(zoomedWidth + barSpacing, 1)
-                                let deltaBars = Int((-value.translation.width / unit).rounded())
+                                let deltaBars = Int((value.translation.width / unit).rounded())
                                 if dragStartHorizontalOffset == nil {
                                     dragStartHorizontalOffset = horizontalBarOffset
                                 }
