@@ -28,6 +28,7 @@ struct StockDetailView: View {
 
     /// ✅ BUY-only Tomorrow analysis (canlı)
     @State private var tomorrow: TomorrowSignalScore? = nil
+    @State private var tomorrowRejectNotes: [String] = []
 
     /// Route üzerinden gelen özet veri (header/fallback hesaplamaları için).
     @State private var snapshot: ScanResult? = nil
@@ -253,9 +254,24 @@ struct StockDetailView: View {
                         }
                     }
                 } else {
-                    Text("BUY sinyali yok (veya veri yok).")
+                    Text("BUY sinyali yok.")
                         .font(T.foot)
                         .foregroundStyle(TVTheme.subtext)
+
+                    if !tomorrowRejectNotes.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Neden çıkmadı:")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(TVTheme.subtext)
+
+                            ForEach(Array(tomorrowRejectNotes.prefix(4)), id: \.self) { note in
+                                Text("• \(note)")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(TVTheme.subtext)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -543,12 +559,14 @@ struct StockDetailView: View {
     private func recalcLiveTomorrowIfNeeded() {
         guard !candles.isEmpty else {
             tomorrow = nil
+            tomorrowRejectNotes = []
             return
         }
 
         let recent = Array(candles.suffix(160))
         guard recent.count >= 80 else {
             tomorrow = nil
+            tomorrowRejectNotes = ["Yetersiz mum verisi"]
             return
         }
 
@@ -566,5 +584,13 @@ struct StockDetailView: View {
             candles: recent,
             preset: .normal
         )
+
+        if tomorrow == nil {
+            let cfg = StrategyConfig.load()
+            let debug = SignalScorer.debugScoreWithConfig(candles: recent, config: cfg)
+            tomorrowRejectNotes = Array(debug.notes.prefix(4))
+        } else {
+            tomorrowRejectNotes = []
+        }
     }
 }
