@@ -23,6 +23,8 @@ struct CandlestickChartView: View {
     private let maxBarWidth: CGFloat = 14
     @State private var zoomScale: CGFloat = 1.0
     @State private var verticalPan: CGFloat = 0
+    @State private var horizontalBarOffset: Int = 0 // 0 = en güncel sağ taraf
+    @State private var dragStartHorizontalOffset: Int?
     private let barSpacing: CGFloat = 4
     private let horizontalPadding: CGFloat = 12
     private let axisHeight: CGFloat = 28
@@ -41,7 +43,8 @@ struct CandlestickChartView: View {
             let chartHeight = max(0, height - axisHeight)
 
             // ✅ Fit modunda: ekrana sığacak kadar son N mum
-            let visible = fitToWidth ? visibleCandles(for: geo.size.width) : candles
+            // ✅ Non-fit modunda: manuel pencere (TradingView benzeri pan/zoom)
+            let visible = fitToWidth ? visibleCandles(for: geo.size.width) : windowCandles(for: geo.size.width)
 
             let (rawMinL, rawMaxH) = minMaxLowHigh(from: visible)
             let rawSpan = max(rawMaxH - rawMinL, 0.000001)
@@ -101,59 +104,69 @@ struct CandlestickChartView: View {
                 )
 
             } else {
-                // TradingView-benzeri: yatay scroll + pinch zoom
+                // TradingView-benzeri manuel pencere: kusursuz yatay pan + pinch zoom
                 let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
 
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            LazyHStack(spacing: barSpacing) {
-                                ForEach(candles.indices, id: \.self) { i in
-                                    let c = candles[i]
-                                    let isSel = (selectedDate == c.date)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: barSpacing) {
+                        ForEach(visible.indices, id: \.self) { i in
+                            let c = visible[i]
+                            let isSel = (selectedDate == c.date)
 
-                                    CandleStickBar(candle: c, y: y, isSelected: isSel)
-                                        .frame(width: zoomedWidth, height: chartHeight)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { updateSelection(c) }
-                                        .onLongPressGesture(minimumDuration: 0.12) { updateSelection(c) }
-                                        .id("candle-\(i)")
-                                }
-                                Color.clear
-                                    .frame(width: 1, height: 1)
-                                    .id("chart-end")
-                            }
-
-                            LazyHStack(spacing: barSpacing) {
-                                ForEach(candles.indices, id: \.self) { i in
-                                    let date = candles[i].date
-                                    let label = axisLabel(at: i, in: candles)
-                                    let isSel = (selectedDate == date)
-
-                                    AxisCell(label: label, isSelected: isSel)
-                                        .frame(width: zoomedWidth, height: axisHeight)
-                                }
-                            }
+                            CandleStickBar(candle: c, y: y, isSelected: isSel)
+                                .frame(width: zoomedWidth, height: chartHeight)
+                                .contentShape(Rectangle())
+                                .onTapGesture { updateSelection(c) }
+                                .onLongPressGesture(minimumDuration: 0.12) { updateSelection(c) }
                         }
-                        .padding(.horizontal, horizontalPadding)
-                        .padding(.vertical, 4)
                     }
-                    .onAppear {
-                        scrollToLatest(proxy)
-                    }
-                    .onChange(of: candles.count) { _ in
-                        scrollToLatest(proxy)
-                    }
-                    .onChange(of: candles.last?.date) { _ in
-                        scrollToLatest(proxy)
+
+                    HStack(spacing: barSpacing) {
+                        ForEach(visible.indices, id: \.self) { i in
+                            let date = visible[i].date
+                            let label = axisLabel(at: i, in: visible)
+                            let isSel = (selectedDate == date)
+
+                            AxisCell(label: label, isSelected: isSel)
+                                .frame(width: zoomedWidth, height: axisHeight)
+                        }
                     }
                 }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 4)
+                        .onChanged { value in
+                            if abs(value.translation.width) >= abs(value.translation.height) {
+                                let unit = max(zoomedWidth + barSpacing, 1)
+                                let deltaBars = Int((-value.translation.width / unit).rounded())
+                                if dragStartHorizontalOffset == nil {
+                                    dragStartHorizontalOffset = horizontalBarOffset
+                                }
+                                let start = dragStartHorizontalOffset ?? horizontalBarOffset
+                                horizontalBarOffset = clampedHorizontalOffset(start + deltaBars, width: geo.size.width)
+                            } else {
+                                verticalPan = value.translation.height
+                            }
+                        }
+                        .onEnded { _ in
+                            dragStartHorizontalOffset = nil
+                        }
+                )
                 .simultaneousGesture(
                     MagnificationGesture()
                         .onChanged { value in
                             zoomScale = min(max(value, 0.7), 2.4)
+                            horizontalBarOffset = clampedHorizontalOffset(horizontalBarOffset, width: geo.size.width)
                         }
                 )
+                .onAppear {
+                    horizontalBarOffset = 0 // her açılışta en güncel sağdan başla
+                }
+                .onChange(of: candles.count) { _ in
+                    horizontalBarOffset = 0
+                }
             }
         }
         .overlay(alignment: .topLeading) {
@@ -207,13 +220,28 @@ struct CandlestickChartView: View {
         triggerSelectionHapticIfNeeded(for: candle)
     }
 
-    private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        let delays: [Double] = [0.0, 0.05, 0.12, 0.22]
-        for d in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + d) {
-                proxy.scrollTo("chart-end", anchor: .trailing)
-            }
-        }
+    private func windowCandles(for width: CGFloat) -> [Candle] {
+        guard !candles.isEmpty else { return [] }
+        let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
+        let unit = max(zoomedWidth + barSpacing, 1)
+        let usable = max(0, width - 2 * horizontalPadding)
+        let visibleCount = max(20, Int(usable / unit))
+
+        let offset = clampedHorizontalOffset(horizontalBarOffset, width: width)
+        let endExclusive = max(0, candles.count - offset)
+        let start = max(0, endExclusive - visibleCount)
+        guard start < endExclusive else { return [candles.last!]} 
+        return Array(candles[start..<endExclusive])
+    }
+
+    private func clampedHorizontalOffset(_ value: Int, width: CGFloat) -> Int {
+        guard !candles.isEmpty else { return 0 }
+        let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
+        let unit = max(zoomedWidth + barSpacing, 1)
+        let usable = max(0, width - 2 * horizontalPadding)
+        let visibleCount = max(20, Int(usable / unit))
+        let maxOffset = max(0, candles.count - visibleCount)
+        return min(max(value, 0), maxOffset)
     }
 
     private func triggerSelectionHapticIfNeeded(for candle: Candle) {
