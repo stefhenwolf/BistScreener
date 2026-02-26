@@ -278,10 +278,14 @@ struct FormationsView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             Text(pattern.rawValue)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(TVTheme.text)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.black)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white)
+                .clipShape(Capsule())
 
             HStack(spacing: 8) {
                 TVChip("\(count) adet", systemImage: "number")

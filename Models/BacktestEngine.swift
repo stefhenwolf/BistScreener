@@ -109,6 +109,47 @@ struct BacktestExitConfig: Codable, Equatable {
             cooldownDays: cooldownDays
         )
     }
+
+    // MARK: - Ultra Bounce Presets
+
+    /// Ultra Quick Flip: 1-3 gün tutma, dar TP/SL
+    static var ultraQuickFlip: BacktestExitConfig {
+        BacktestExitConfig(
+            tp1Pct: 3.0,
+            tp2Pct: 5.0,
+            tp1SellPercent: 60.0,
+            stopLossPct: 2.5,
+            maxHoldDays: 3,
+            cooldownDays: 1
+        )
+    }
+
+    /// Ultra Swing: 3-7 gün tutma, orta TP/SL
+    static var ultraSwing: BacktestExitConfig {
+        BacktestExitConfig(
+            tp1Pct: 4.0,
+            tp2Pct: 8.0,
+            tp1SellPercent: 50.0,
+            stopLossPct: 3.5,
+            maxHoldDays: 7,
+            cooldownDays: 2
+        )
+    }
+
+    /// Ultra Dynamic: ATR-bazlı TP/SL
+    static func ultraDynamic(candles: [Candle], config: UltraStrategyConfig = .hunter) -> BacktestExitConfig {
+        guard let exits = UltraSignalScorer.calculateDynamicExits(candles: candles, config: config) else {
+            return .ultraQuickFlip
+        }
+        return BacktestExitConfig(
+            tp1Pct: exits.tpPct * 0.6,
+            tp2Pct: exits.tpPct,
+            tp1SellPercent: 50.0,
+            stopLossPct: exits.slPct,
+            maxHoldDays: 5,
+            cooldownDays: 1
+        )
+    }
 }
 
 // MARK: - Portfolio Add-On Configuration
@@ -350,6 +391,8 @@ final class BacktestEngine: ObservableObject {
     func run(
         indexOption: IndexOption,
         preset: TomorrowPreset,
+        strategyMode: ScanStrategyMode = .preBreakout,
+        ultraPreset: UltraPreset = .hunter,
         exitConfig: BacktestExitConfig = BacktestExitConfig(),
         portfolioConfig: BacktestPortfolioConfig = BacktestPortfolioConfig()
     ) {
@@ -374,6 +417,8 @@ final class BacktestEngine: ObservableObject {
                     yahoo: yahoo,
                     indexOption: indexOption,
                     preset: preset,
+                    strategyMode: strategyMode,
+                    ultraPreset: ultraPreset,
                     exitConfig: exitConfig,
                     portfolioConfig: portfolioConfig
                 ) { done, total, signalCount in
@@ -415,6 +460,8 @@ final class BacktestEngine: ObservableObject {
         yahoo: YahooFinanceService,
         indexOption: IndexOption,
         preset: TomorrowPreset,
+        strategyMode: ScanStrategyMode = .preBreakout,
+        ultraPreset: UltraPreset = .hunter,
         exitConfig: BacktestExitConfig,
         portfolioConfig: BacktestPortfolioConfig,
         includeTodaySignals: Bool = false,
@@ -463,6 +510,8 @@ final class BacktestEngine: ObservableObject {
                         yahoo: yahoo,
                         symbol: sym,
                         preset: preset,
+                        strategyMode: strategyMode,
+                        ultraPreset: ultraPreset,
                         baseConfig: baseConfig,
                         lookback: lookback,
                         exitConfig: exitConfig,
@@ -492,6 +541,8 @@ final class BacktestEngine: ObservableObject {
                             yahoo: yahoo,
                             symbol: sym,
                             preset: preset,
+                            strategyMode: strategyMode,
+                            ultraPreset: ultraPreset,
                             baseConfig: baseConfig,
                             lookback: lookback,
                             exitConfig: exitConfig,
@@ -512,6 +563,8 @@ final class BacktestEngine: ObservableObject {
         yahoo: YahooFinanceService,
         symbol: String,
         preset: TomorrowPreset,
+        strategyMode: ScanStrategyMode,
+        ultraPreset: UltraPreset,
         baseConfig: StrategyConfig,
         lookback: Int,
         exitConfig: BacktestExitConfig,
@@ -555,17 +608,24 @@ final class BacktestEngine: ObservableObject {
                 if dayIdx > startIdx { signalSlice.append(candles[dayIdx]) }
 
                 let regime = MarketRegimeDetector.detect(from: signalSlice)
-                scoringConfig.minScore = SignalScorer.dynamicMinScore(
-                    for: preset,
-                    regime: regime,
-                    config: scoringConfig
-                )
-
-                signalsByDay[dayIdx] = SignalScorer.scoreWithConfig(
-                    candles: signalSlice,
-                    config: scoringConfig,
-                    softMode: true
-                )
+                if strategyMode == .ultraBounce {
+                    signalsByDay[dayIdx] = UltraSignalScorer.score(
+                        candles: signalSlice,
+                        config: ultraPreset.config,
+                        regime: regime
+                    )
+                } else {
+                    scoringConfig.minScore = SignalScorer.dynamicMinScore(
+                        for: preset,
+                        regime: regime,
+                        config: scoringConfig
+                    )
+                    signalsByDay[dayIdx] = SignalScorer.scoreWithConfig(
+                        candles: signalSlice,
+                        config: scoringConfig,
+                        softMode: true
+                    )
+                }
             }
 
             let hasBuySignalByDay: [Bool] = signalsByDay.map { $0 != nil }

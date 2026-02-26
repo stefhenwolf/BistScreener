@@ -30,6 +30,9 @@ final class PortfolioViewModel: ObservableObject {
 
     private let store = PortfolioStore.shared
     private let yahoo: YahooFinanceService
+    private let cloudRepository: any CloudDataRepository
+    private var cloudUserID: String?
+    private var localStorageUserKey: String = "guest"
 
     // ── USD/TRY cache (5 dk TTL) ──
     private var cachedUsdTry: Double?
@@ -46,8 +49,34 @@ final class PortfolioViewModel: ObservableObject {
     private let priceTTL: TimeInterval = 120 // 2 dakika
     private let maxPriceFetchConcurrency: Int = 8
 
-    init(yahoo: YahooFinanceService = YahooFinanceService()) {
+    init(
+        yahoo: YahooFinanceService = YahooFinanceService(),
+        cloudRepository: any CloudDataRepository = NoopCloudDataRepository()
+    ) {
         self.yahoo = yahoo
+        self.cloudRepository = cloudRepository
+    }
+
+    func setCloudUserID(_ userID: String?) {
+        let normalized = userID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = (normalized?.isEmpty == false) ? normalized : nil
+        let newLocalKey = sanitizedStorageKey(clean)
+        let userChanged = cloudUserID != clean || localStorageUserKey != newLocalKey
+        guard userChanged else { return }
+
+        cloudUserID = clean
+        localStorageUserKey = newLocalKey
+
+        Task { [weak self] in
+            guard let self else { return }
+            await store.setActiveUserKey(newLocalKey)
+            await loadFromDisk()
+            let hydratedFromCloud = await hydratePortfolioFromCloudIfPossible()
+            if !hydratedFromCloud {
+                await syncPortfolioToCloud(snapshot: assets)
+            }
+            await refreshPricesAsync()
+        }
     }
 
     // MARK: - FX: concurrent Yahoo + Frankfurter
@@ -170,21 +199,20 @@ final class PortfolioViewModel: ObservableObject {
         }
 
         let snapshot = assets
-        Task { [store] in
-            await store.save(snapshot)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.persistAndSync(snapshot)
         }
     }
 
     func delete(at offsets: IndexSet) {
-        let ids = offsets.compactMap { idx -> UUID? in
-            guard assets.indices.contains(idx) else { return nil }
-            return assets[idx].id
-        }
-
         assets.remove(atOffsets: offsets)
 
-        Task { [store] in
-            await store.delete(ids: ids)
+        let snapshot = assets
+        Task { [weak self] in
+            guard let self else { return }
+            await self.store.save(snapshot)
+            await self.syncPortfolioToCloud(snapshot: snapshot)
         }
     }
 
@@ -196,8 +224,11 @@ final class PortfolioViewModel: ObservableObject {
         assets.removeAll { keys.contains($0.symbol.uppercased()) }
 
         // Disk
-        Task { [store] in
-            await store.delete(symbols: Array(keys))
+        let snapshot = assets
+        Task { [weak self] in
+            guard let self else { return }
+            await self.store.save(snapshot)
+            await self.syncPortfolioToCloud(snapshot: snapshot)
         }
     }
 
@@ -243,11 +274,54 @@ final class PortfolioViewModel: ObservableObject {
 
         assets = updated
         let snapshot = assets
-        Task { [store] in
-            await store.save(snapshot)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.persistAndSync(snapshot)
         }
         refreshPrices()
         return true
+    }
+
+    private func persistAndSync(_ snapshot: [Asset]) async {
+        await store.save(snapshot)
+        await syncPortfolioToCloud(snapshot: snapshot)
+    }
+
+    private func syncPortfolioToCloud(snapshot: [Asset]) async {
+        guard let userID = cloudUserID else { return }
+        do {
+            try await cloudRepository.replacePortfolioPositions(userID: userID, assets: snapshot)
+        } catch {
+            await MainActor.run {
+                self.errorText = "Cloud portföy yazılamadı: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func hydratePortfolioFromCloudIfPossible() async -> Bool {
+        guard let userID = cloudUserID else { return false }
+        do {
+            let remote = try await cloudRepository.fetchPortfolioPositions(userID: userID)
+            guard !remote.isEmpty else { return false }
+            await store.save(remote)
+            await MainActor.run {
+                self.assets = remote
+            }
+            return true
+        } catch {
+            await MainActor.run {
+                self.errorText = "Cloud portföy okunamadı: \(error.localizedDescription)"
+            }
+            return false
+        }
+    }
+
+    private func sanitizedStorageKey(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(scalars)
+        return out.isEmpty ? "guest" : out
     }
 
     // MARK: - Refresh prices
@@ -272,6 +346,7 @@ final class PortfolioViewModel: ObservableObject {
             rows = []
             totalTRY = 0
             lastUpdated = Date()
+            publishWidgetSnapshot(rows: [], totalTRY: 0, updatedAt: lastUpdated ?? Date())
             return
         }
 
@@ -295,6 +370,8 @@ final class PortfolioViewModel: ObservableObject {
 
                     let fetchSymbol: String = {
                         switch a.type {
+                        case .cash:
+                            return ""
                         case .metal:
                             return Self.yahooSymbolForMetal(original: a.symbol)
                         case .stock, .fund:
@@ -305,7 +382,12 @@ final class PortfolioViewModel: ObservableObject {
                         }
                     }()
 
-                    let (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    let (last, prev): (Double?, Double?)
+                    if a.type == .cash {
+                        (last, prev) = (1.0, 1.0)
+                    } else {
+                        (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    }
                     return Self.makeRow(asset: a, lastPrice: last, prevClose: prev, usdTry: usdTrySnap)
                 }
             }
@@ -320,6 +402,8 @@ final class PortfolioViewModel: ObservableObject {
 
                     let fetchSymbol: String = {
                         switch a.type {
+                        case .cash:
+                            return ""
                         case .metal:
                             return Self.yahooSymbolForMetal(original: a.symbol)
                         case .stock, .fund:
@@ -329,7 +413,12 @@ final class PortfolioViewModel: ObservableObject {
                         }
                     }()
 
-                    let (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    let (last, prev): (Double?, Double?)
+                    if a.type == .cash {
+                        (last, prev) = (1.0, 1.0)
+                    } else {
+                        (last, prev) = await self.fetchPrice(symbol: fetchSymbol)
+                    }
                     return Self.makeRow(asset: a, lastPrice: last, prevClose: prev, usdTry: usdTrySnap)
                 }
             }
@@ -346,6 +435,7 @@ final class PortfolioViewModel: ObservableObject {
         rows = tmp
         totalTRY = tmp.compactMap(\.valueTRY).reduce(0, +)
         lastUpdated = Date()
+        publishWidgetSnapshot(rows: tmp, totalTRY: totalTRY, updatedAt: lastUpdated ?? Date())
     }
 
     // MARK: - Price fetch (with in-memory TTL cache)
@@ -377,6 +467,20 @@ final class PortfolioViewModel: ObservableObject {
         priceCache.removeAll()
         cachedUsdTry = nil
         usdTryFetchedAt = nil
+    }
+
+    private func publishWidgetSnapshot(rows: [PortfolioRow], totalTRY: Double, updatedAt: Date) {
+        let totalPnL = rows.compactMap(\.pnlTRY).reduce(0, +)
+        let invested = max(0, totalTRY - totalPnL)
+        let totalPnLPct = invested > 0 ? (totalPnL / invested) * 100 : 0
+        let snapshot = PortfolioWidgetSnapshot(
+            totalTRY: totalTRY,
+            totalPnLTRY: totalPnL,
+            totalPnLPct: totalPnLPct,
+            assetCount: rows.count,
+            updatedAt: updatedAt
+        )
+        WidgetSnapshotBridge.shared.writePortfolioSnapshot(snapshot)
     }
 
     // MARK: - Merge (same symbol+type)
@@ -450,6 +554,8 @@ final class PortfolioViewModel: ObservableObject {
             return raw.normalizedBISTSymbol()
         case .fx, .metal, .crypto:
             return raw
+        case .cash:
+            return "TRY"
         }
     }
 
@@ -489,6 +595,10 @@ final class PortfolioViewModel: ObservableObject {
 
         if let lp {
             switch asset.type {
+            case .cash:
+                valueTRY = asset.quantity
+                dayPnlTRY = 0
+                dayChangePct = 0
 
             // ── Metal: USD/ons → TRY/gram çevrim ──
             case .metal:
@@ -537,7 +647,7 @@ final class PortfolioViewModel: ObservableObject {
         }
 
         var pnl: Double? = nil
-        if let valueTRY, let avg = asset.avgCostTRY {
+        if asset.type != .cash, let valueTRY, let avg = asset.avgCostTRY {
             pnl = valueTRY - (avg * asset.quantity)
         }
 

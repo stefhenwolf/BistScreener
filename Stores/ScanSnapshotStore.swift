@@ -4,6 +4,11 @@ enum ScanSnapshotStore {
     // MARK: - Filenames
 
     static let baseFilename = "scan_snapshot_v1"
+    private static var activeUserKey = "guest"
+
+    static func setActiveUserKey(_ userKey: String?) {
+        activeUserKey = sanitize(userKey)
+    }
 
     // MARK: - Legacy (single file)
 
@@ -90,7 +95,15 @@ enum ScanSnapshotStore {
             suffix = ""
         }
 
-        return dir.appendingPathComponent("\(baseFilename)\(suffix).json")
+        return dir.appendingPathComponent("\(baseFilename)_\(activeUserKey)\(suffix).json")
+    }
+
+    private static func sanitize(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let chars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(chars)
+        return out.isEmpty ? "guest" : out
     }
 }
 

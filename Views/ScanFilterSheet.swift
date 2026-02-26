@@ -5,12 +5,16 @@ struct ScanFilterSheet: View {
     @ObservedObject var vm: ScannerViewModel
 
     @State private var tempPreset: TomorrowPreset
+    @State private var tempUltraPreset: UltraPreset
+    @State private var tempStrategyMode: ScanStrategyMode
     @State private var tempMaxResults: Int
     @State private var rescanOnApply: Bool = true
 
     init(vm: ScannerViewModel) {
         self.vm = vm
         _tempPreset = State(initialValue: vm.preset)
+        _tempUltraPreset = State(initialValue: vm.ultraPreset)
+        _tempStrategyMode = State(initialValue: vm.strategyMode)
         _tempMaxResults = State(initialValue: vm.maxResults)
     }
 
@@ -22,34 +26,85 @@ struct ScanFilterSheet: View {
                 ScrollView {
                     VStack(spacing: DS.s12) {
 
-                        // 1) Preset
+                        // 0) Strateji Modu
                         TVCard {
                             VStack(alignment: .leading, spacing: DS.s12) {
-                                HStack {
-                                    Text("Strateji Preset’i")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .foregroundStyle(TVTheme.text)
-                                    Spacer()
-                                    TVChip(tempPreset.title, systemImage: "slider.horizontal.3")
-                                }
+                                Text("Strateji Modu")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(TVTheme.text)
 
-                                Picker("Preset", selection: $tempPreset) {
-                                    Text("Relaxed").tag(TomorrowPreset.relaxed)
-                                    Text("Normal").tag(TomorrowPreset.normal)
-                                    Text("Strict").tag(TomorrowPreset.strict)
+                                Picker("Mod", selection: $tempStrategyMode) {
+                                    ForEach(ScanStrategyMode.allCases, id: \.self) { mode in
+                                        Text(mode.title).tag(mode)
+                                    }
                                 }
                                 .pickerStyle(.segmented)
 
-                                Divider().opacity(0.25)
+                                Text(strategyModeDescription(tempStrategyMode))
+                                    .font(.footnote)
+                                    .foregroundStyle(TVTheme.subtext)
+                            }
+                        }
 
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(presetDescription(tempPreset))
-                                        .font(.footnote)
-                                        .foregroundStyle(TVTheme.subtext)
+                        // 1) Preset
+                        TVCard {
+                            VStack(alignment: .leading, spacing: DS.s12) {
+                                if tempStrategyMode == .ultraBounce {
+                                    // Ultra Bounce presets
+                                    HStack {
+                                        Text("Ultra Preset")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(TVTheme.text)
+                                        Spacer()
+                                        TVChip(tempUltraPreset.title, systemImage: "bolt.fill")
+                                    }
 
-                                    Text(presetRulesLine(tempPreset))
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(TVTheme.text.opacity(0.85))
+                                    Picker("Ultra Preset", selection: $tempUltraPreset) {
+                                        Text("Sniper").tag(UltraPreset.sniper)
+                                        Text("Hunter").tag(UltraPreset.hunter)
+                                        Text("Scout").tag(UltraPreset.scout)
+                                    }
+                                    .pickerStyle(.segmented)
+
+                                    Divider().opacity(0.25)
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(ultraPresetDescription(tempUltraPreset))
+                                            .font(.footnote)
+                                            .foregroundStyle(TVTheme.subtext)
+
+                                        Text(ultraPresetRulesLine(tempUltraPreset))
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(TVTheme.text.opacity(0.85))
+                                    }
+                                } else {
+                                    // Pre-Breakout presets
+                                    HStack {
+                                        Text("Strateji Preset’i")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .foregroundStyle(TVTheme.text)
+                                        Spacer()
+                                        TVChip(tempPreset.title, systemImage: "slider.horizontal.3")
+                                    }
+
+                                    Picker("Preset", selection: $tempPreset) {
+                                        Text("Relaxed").tag(TomorrowPreset.relaxed)
+                                        Text("Normal").tag(TomorrowPreset.normal)
+                                        Text("Strict").tag(TomorrowPreset.strict)
+                                    }
+                                    .pickerStyle(.segmented)
+
+                                    Divider().opacity(0.25)
+
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(presetDescription(tempPreset))
+                                            .font(.footnote)
+                                            .foregroundStyle(TVTheme.subtext)
+
+                                        Text(presetRulesLine(tempPreset))
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(TVTheme.text.opacity(0.85))
+                                    }
                                 }
                             }
                         }
@@ -120,7 +175,9 @@ struct ScanFilterSheet: View {
     }
 
     private func apply() {
+        vm.strategyMode = tempStrategyMode
         vm.preset = tempPreset
+        vm.ultraPreset = tempUltraPreset
         vm.maxResults = tempMaxResults
 
         dismiss()
@@ -151,5 +208,32 @@ struct ScanFilterSheet: View {
         case .strict:
             return "Min BUY: \(p.minBuyTotal) • Tier C kapalı"
         }
+    }
+
+    // MARK: - Ultra Descriptions
+
+    private func strategyModeDescription(_ mode: ScanStrategyMode) -> String {
+        switch mode {
+        case .preBreakout:
+            return "Kırılıma yakın hisseleri tarar. Breakout potansiyeli yüksek olan seviyelere yakınlığı ölçer."
+        case .ultraBounce:
+            return "9-faktörlü ultra strateji: RSI bounce, hacim gücü, trend hizalama, pullback kalitesi ve daha fazlası. Günlük %5+ hareket potansiyeli olan hisseleri bulur."
+        }
+    }
+
+    private func ultraPresetDescription(_ p: UltraPreset) -> String {
+        switch p {
+        case .sniper:
+            return "En seçici mod. Sadece en güçlü sinyaller geçer. Az ama çok kaliteli BUY sinyalleri."
+        case .hunter:
+            return "Dengeli mod. 9 faktörün optimal dengesini kurar. Günlük 5-15 BUY hedefi."
+        case .scout:
+            return "Geniş tarama modu. Daha fazla aday gösterir. Keşif ve izleme için uygundur."
+        }
+    }
+
+    private func ultraPresetRulesLine(_ p: UltraPreset) -> String {
+        let cfg = p.config
+        return "Min Skor: \(cfg.minScore) • ATR > %\(String(format: "%.1f", cfg.minATRPct)) • ADX > \(Int(cfg.minADX))"
     }
 }

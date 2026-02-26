@@ -52,6 +52,10 @@ struct AddEditAssetSheet: View {
 
     private var presetsForType: [Preset] {
         switch type {
+        case .cash:
+            return [
+                .init(title: "Türk Lirası Nakit", symbol: "TRY", defaultName: "Nakit (TRY)", hint: "Nakit doğrudan TL tutarı olarak izlenir.")
+            ]
         case .metal:
             return [
                 .init(title: "Altın", symbol: "XAUUSD=X", defaultName: "Altın", hint: "Gram bazında takip edilir."),
@@ -85,6 +89,7 @@ struct AddEditAssetSheet: View {
     private var presetHint: String {
         if let p = selectedPreset, !p.hint.isEmpty { return p.hint }
         switch type {
+        case .cash:   return "Nakit için sadece TL tutarı girilir."
         case .metal:  return "Miktar: gram. Fiyat USD/ons gelir, TRY/gram’a çevrilir."
         case .fx:     return "Örn: USDTRY=X"
         case .crypto: return "Örn: BTC-USD"
@@ -103,6 +108,7 @@ struct AddEditAssetSheet: View {
 
     private var quantityPlaceholder: String {
         switch type {
+        case .cash:   return "Nakit tutarı (₺)"
         case .metal:  return "Miktar (gram)"
         case .stock:  return "Miktar (lot/adet)"
         case .fund:   return "Miktar (adet)"
@@ -113,6 +119,7 @@ struct AddEditAssetSheet: View {
 
     private var avgCostPlaceholder: String {
         switch type {
+        case .cash:   return "Nakitte maliyet kullanılmaz"
         case .metal:  return "Ortalama maliyet (₺/gram) (opsiyonel)"
         default:      return "Ortalama maliyet (TRY) (opsiyonel)"
         }
@@ -296,13 +303,17 @@ struct AddEditAssetSheet: View {
                 .keyboardType(.asciiCapable)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-                .disabled(!useManualSymbol && !(selectedPreset?.symbol.isEmpty ?? true) && !presetID.isEmpty)
+                .disabled(
+                    type == .cash ||
+                    (!useManualSymbol && !(selectedPreset?.symbol.isEmpty ?? true) && !presetID.isEmpty)
+                )
 
             quantityEditor
 
             TextField(avgCostPlaceholder, text: $avgCostText)
                 .keyboardType(.decimalPad)
                 .textFieldStyle(.roundedBorder)
+                .disabled(type == .cash)
 
             Text(exampleLine())
                 .font(.caption2)
@@ -490,7 +501,16 @@ struct AddEditAssetSheet: View {
         guard asset == nil else { return }
 
         guard let p = selectedPreset, !presetID.isEmpty else {
-            useManualSymbol = true
+            useManualSymbol = (type != .cash)
+            return
+        }
+
+        if type == .cash {
+            useManualSymbol = false
+            symbol = "TRY"
+            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                name = "Nakit (TRY)"
+            }
             return
         }
 
@@ -516,7 +536,8 @@ struct AddEditAssetSheet: View {
             alert = .init(title: "Eksik bilgi", message: "İsim boş olamaz.")
             return
         }
-        guard !sym.isEmpty else {
+        let finalSymbol = (type == .cash) ? "TRY" : sym
+        guard !finalSymbol.isEmpty else {
             alert = .init(title: "Eksik bilgi", message: "Sembol boş olamaz.")
             return
         }
@@ -547,9 +568,9 @@ struct AddEditAssetSheet: View {
             id: id,
             type: type,
             name: finalName,
-            symbol: sym,
+            symbol: finalSymbol,
             quantity: q,
-            avgCostTRY: avgCost
+            avgCostTRY: type == .cash ? nil : avgCost
         )
 
         onSave(new)
@@ -588,6 +609,8 @@ struct AddEditAssetSheet: View {
 
     private func exampleLine() -> String {
         switch type {
+        case .cash:
+            return "Örnek: Nakit (TRY), Tutar: 25.000"
         case .metal:
             return "Örnek: XAUUSD=X, Miktar: 50 (gram), Maliyet: 2.100 (₺/gr)"
         case .fx:

@@ -24,9 +24,17 @@ final class FavoritesViewModel: ObservableObject {
     private let yahoo = YahooFinanceService()
 
     // Persist (kullanıcı "Güncelle" butonuna basmadan da liste boş kalmasın)
-    private let cacheKey = "favorites_rows_cache_v1"
+    private let cacheKeyPrefix = "favorites_rows_cache_v1"
+    private var activeUserKey: String = "guest"
 
     init() {
+        loadFromDisk()
+    }
+
+    func setActiveUserKey(_ userKey: String?) {
+        let cleaned = sanitize(userKey)
+        guard cleaned != activeUserKey else { return }
+        activeUserKey = cleaned
         loadFromDisk()
     }
 
@@ -57,6 +65,7 @@ final class FavoritesViewModel: ObservableObject {
     }
 
     private func loadFromDisk() {
+        let cacheKey = "\(cacheKeyPrefix).\(activeUserKey)"
         guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return }
         do {
             let decoded = try JSONDecoder().decode([FavoriteRow].self, from: data)
@@ -67,12 +76,21 @@ final class FavoritesViewModel: ObservableObject {
     }
 
     private func saveToDisk() {
+        let cacheKey = "\(cacheKeyPrefix).\(activeUserKey)"
         do {
             let data = try JSONEncoder().encode(rows)
             UserDefaults.standard.set(data, forKey: cacheKey)
         } catch {
             // sessiz
         }
+    }
+
+    private func sanitize(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let chars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(chars)
+        return out.isEmpty ? "guest" : out
     }
 
     private func fetchRows(symbols: [String]) async throws -> [FavoriteRow] {

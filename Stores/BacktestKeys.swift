@@ -13,7 +13,12 @@ enum BacktestKeys {
     static let cooldownDays    = "backtest.exit.cooldownDays"
 
     // Portfolio Management
+    static let minPerPositionTL = "backtest.portfolio.minPerPositionTL"
     static let maxPerPositionTL = "backtest.portfolio.maxPerPositionTL"
     static let addOnMode        = "backtest.portfolio.addOnMode"
     static let addOnWaitDays    = "backtest.portfolio.addOnWaitDays"
+
+    // Signal mode
+    static let strategyMode     = "backtest.signal.strategyMode"
+    static let ultraPreset      = "backtest.signal.ultraPreset"
 }

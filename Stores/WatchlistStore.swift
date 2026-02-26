@@ -11,8 +11,11 @@ import Foundation
 final class WatchlistStore: ObservableObject {
     @Published private(set) var symbols: [String] = []
 
-    private let key = "watchlist_symbols_v1"
+    private let keyPrefix = "watchlist_symbols_v1"
     private let limit = 100
+    private var activeUserKey: String = "guest"
+    private let cloudRepository: any CloudDataRepository
+    private var cloudUserID: String?
 
     enum AddResult {
         case added
@@ -21,7 +24,25 @@ final class WatchlistStore: ObservableObject {
         case invalid
     }
 
-    init() { load() }
+    init(cloudRepository: any CloudDataRepository = NoopCloudDataRepository()) {
+        self.cloudRepository = cloudRepository
+        load()
+    }
+
+    func setUserContext(localUserKey: String?, cloudUserID: String?) {
+        let normalizedCloud = cloudUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanCloud = (normalizedCloud?.isEmpty == false) ? normalizedCloud : nil
+        let cleaned = sanitize(localUserKey)
+        let changed = cleaned != activeUserKey || cleanCloud != self.cloudUserID
+        guard changed else { return }
+        activeUserKey = cleaned
+        self.cloudUserID = cleanCloud
+        load()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.hydrateFromCloudOrUploadFallback()
+        }
+    }
 
     func contains(_ symbol: String) -> Bool {
         symbols.contains(symbol.normalizedBISTSymbol())
@@ -37,6 +58,7 @@ final class WatchlistStore: ObservableObject {
         symbols.append(s)
         symbols.sort()
         save()
+        syncToCloud()
         return .added
     }
 
@@ -44,6 +66,7 @@ final class WatchlistStore: ObservableObject {
         let s = symbol.normalizedBISTSymbol()
         symbols.removeAll { $0 == s }
         save()
+        syncToCloud()
     }
 
     func toggle(_ symbol: String) {
@@ -51,21 +74,61 @@ final class WatchlistStore: ObservableObject {
         if let idx = symbols.firstIndex(of: s) {
             symbols.remove(at: idx)
             save()
+            syncToCloud()
         } else {
             _ = add(s)
         }
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return }
+        let key = "\(keyPrefix).\(activeUserKey)"
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            symbols = []
+            return
+        }
         if let decoded = try? JSONDecoder().decode([String].self, from: data) {
             symbols = decoded
+        } else {
+            symbols = []
         }
     }
 
     private func save() {
+        let key = "\(keyPrefix).\(activeUserKey)"
         if let data = try? JSONEncoder().encode(symbols) {
             UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    private func sanitize(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let chars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(chars)
+        return out.isEmpty ? "guest" : out
+    }
+
+    private func hydrateFromCloudOrUploadFallback() async {
+        guard let uid = cloudUserID else { return }
+        do {
+            if let remote = try await cloudRepository.fetchWatchlist(userID: uid) {
+                await MainActor.run {
+                    self.symbols = remote.sorted()
+                    self.save()
+                }
+            } else {
+                try await cloudRepository.upsertWatchlist(userID: uid, symbols: symbols)
+            }
+        } catch {
+            // Sessiz: local fallback devam eder.
+        }
+    }
+
+    private func syncToCloud() {
+        guard let uid = cloudUserID else { return }
+        let snapshot = symbols
+        Task { [cloudRepository] in
+            try? await cloudRepository.upsertWatchlist(userID: uid, symbols: snapshot)
         }
     }
 }

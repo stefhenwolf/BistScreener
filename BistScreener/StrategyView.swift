@@ -250,6 +250,23 @@ struct StrategyView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .opacity(strategy.settings.strategyMode == .preBreakout ? 1 : 0.45)
+                .disabled(strategy.settings.strategyMode != .preBreakout)
+
+                Picker("Strateji", selection: strategyModeBinding) {
+                    Text("Pre-Breakout").tag(ScanStrategyMode.preBreakout)
+                    Text("Ultra Bounce").tag(ScanStrategyMode.ultraBounce)
+                }
+                .pickerStyle(.segmented)
+
+                if strategy.settings.strategyMode == .ultraBounce {
+                    Picker("Ultra Preset", selection: ultraPresetBinding) {
+                        Text("Sniper").tag(UltraPreset.sniper)
+                        Text("Hunter").tag(UltraPreset.hunter)
+                        Text("Scout").tag(UltraPreset.scout)
+                    }
+                    .pickerStyle(.segmented)
+                }
 
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -266,6 +283,13 @@ struct StrategyView: View {
                 .padding(10)
                 .background(TVTheme.surface2)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                stepperRow(
+                    title: "Hisse başı min",
+                    valueText: formatTL(strategy.settings.minPerPositionTL),
+                    decrement: { strategy.settings.minPerPositionTL -= 100 },
+                    increment: { strategy.settings.minPerPositionTL += 100 }
+                )
 
                 stepperRow(
                     title: "Hisse başı max",
@@ -331,7 +355,7 @@ struct StrategyView: View {
                     increment: { strategy.settings.autoRefreshMinutes += 1 }
                 )
 
-                Text("Canlı simülasyon Backtest kurallarını kullanır: preset, kademeli TP1/TP2, SL/Max gün, cooldown, gün sonu hareketleri ve nakit yönetimi.")
+                Text("Canlı simülasyon Backtest kurallarını kullanır: strateji modu (Pre-Breakout/Ultra Bounce), kademeli TP1/TP2, SL/Max gün, cooldown ve nakit yönetimi.")
                     .font(.caption)
                     .foregroundStyle(TVTheme.subtext)
             }
@@ -891,6 +915,20 @@ struct StrategyView: View {
         Binding(
             get: { strategy.settings.preset },
             set: { strategy.settings.preset = $0 }
+        )
+    }
+
+    private var strategyModeBinding: Binding<ScanStrategyMode> {
+        Binding(
+            get: { strategy.settings.strategyMode },
+            set: { strategy.settings.strategyMode = $0 }
+        )
+    }
+
+    private var ultraPresetBinding: Binding<UltraPreset> {
+        Binding(
+            get: { strategy.settings.ultraPreset },
+            set: { strategy.settings.ultraPreset = $0 }
         )
     }
 

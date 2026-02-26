@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function hasRequiredSnapshotFields() {
+      return request.resource.data.keys().hasAll([
+        'schemaVersion',
+        'updatedAt',
+        'isRunning',
+        'initialCapitalTL',
+        'cashTL',
+        'settings',
+        'holdings',
+        'pendingActions'
+      ]);
+    }
+
+    match /users/{uid} {
+      allow read, write: if false;
+
+      match /strategyState/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid) && hasRequiredSnapshotFields();
+        allow delete: if isOwner(uid);
+      }
+
+      match /strategyEvents/{eventId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasAll([
+            'id',
+            'date',
+            'kind',
+            'symbol',
+            'amountTL',
+            'cashAfterTL',
+            'note',
+            'holdingsText',
+            'dateEpoch'
+          ]);
+        allow delete: if isOwner(uid);
+      }
+
+      match /portfolioPositions/{positionId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasAll([
+            'id',
+            'type',
+            'name',
+            'symbol',
+            'quantity',
+            'avgCostTRY',
+            'createdAt',
+            'updatedAtEpoch'
+          ]);
+        allow delete: if isOwner(uid);
+      }
+
+      // Favori listesi: users/{uid}/watchlist/state
+      match /watchlist/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasAll([
+            'symbols',
+            'updatedAtEpoch'
+          ]);
+        allow delete: if isOwner(uid);
+      }
+
+      // Tarama özet istatistikleri: users/{uid}/scanState/stats
+      match /scanState/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasAll([
+            'lastScanDate',
+            'lastUniverseCount',
+            'lastMatchesCount',
+            'updatedAt',
+            'updatedAtEpoch'
+          ]);
+        allow delete: if isOwner(uid);
+      }
+
+      // Tarama snapshotları: users/{uid}/scanSnapshots/{indexRaw}
+      match /scanSnapshots/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasAll([
+            'savedAt',
+            'indexRaw',
+            'universeCount',
+            'results',
+            'savedAtEpoch',
+            'updatedAtEpoch'
+          ]);
+        allow delete: if isOwner(uid);
+      }
+    }
+  }
+}

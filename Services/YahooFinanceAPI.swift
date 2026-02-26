@@ -104,7 +104,21 @@ final class YahooFinanceService {
 
     /// range examples: "10d", "1mo", "3mo", "6mo", "1y", "5y", "max"
     func fetchDailyCandles(symbol: String, range: String = "6mo") async throws -> [Candle] {
+        try await fetchCandles(symbol: symbol, range: range, interval: "1d", includePrePost: false)
+    }
 
+    /// Onay anı fiyatı için intraday son fiyat (örn. 5 dakikalık mumların son kapanışı).
+    func fetchLatestIntradayPrice(symbol: String, range: String = "1d", interval: String = "5m") async throws -> Double? {
+        let candles = try await fetchCandles(symbol: symbol, range: range, interval: interval, includePrePost: false)
+        return candles.last?.close
+    }
+
+    private func fetchCandles(
+        symbol: String,
+        range: String,
+        interval: String,
+        includePrePost: Bool
+    ) async throws -> [Candle] {
         // ✅ Yahoo path encoding: XAUUSD=X gibi sembollerde "=" var, .urlPathAllowed bazen sorun çıkarır
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-=^"))
         let sym = symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -113,8 +127,8 @@ final class YahooFinanceService {
         var components = URLComponents(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encodedSymbol)")!
         components.queryItems = [
             .init(name: "range", value: range),
-            .init(name: "interval", value: "1d"),
-            .init(name: "includePrePost", value: "false"),
+            .init(name: "interval", value: interval),
+            .init(name: "includePrePost", value: includePrePost ? "true" : "false"),
             .init(name: "events", value: "div|split")
         ]
 

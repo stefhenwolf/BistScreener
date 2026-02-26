@@ -11,6 +11,7 @@ import UIKit
 
 struct FavoritesView: View {
     @EnvironmentObject private var watchlist: WatchlistStore
+    @EnvironmentObject private var auth: AuthSessionStore
     @StateObject private var vm = FavoritesViewModel()
 
     @State private var showAddSheet = false
@@ -41,16 +42,17 @@ struct FavoritesView: View {
         // ✅ Otomatik network güncellemesi yok.
         // Favoriler yalnızca "Güncelle" butonu veya pull-to-refresh ile yenilenir.
         .onAppear {
+            vm.setActiveUserKey(auth.cloudUserID ?? auth.currentUser?.providerUserID)
+            vm.setSymbols(watchlist.symbols)
+        }
+        .onChangeCompat(of: auth.currentUser?.providerUserID) { _ in
+            vm.setActiveUserKey(auth.cloudUserID ?? auth.currentUser?.providerUserID)
             vm.setSymbols(watchlist.symbols)
         }
         .onChangeCompat(of: watchlist.symbols) { new in
             withAnimation(.snappy) {
                 vm.setSymbols(new)
             }
-        }
-        .refreshable {
-            Haptics.light()
-            vm.refresh(symbols: watchlist.symbols)
         }
         .sheet(isPresented: $showAddSheet) {
             AddFavoriteSheet {
@@ -160,15 +162,24 @@ struct FavoritesView: View {
 
     // MARK: - List
 
+    @ViewBuilder
     private var listBody: some View {
         if watchlist.symbols.isEmpty {
-            return AnyView(
+            ScrollView {
                 emptyState
-                    .padding(.horizontal, DS.s16) // ✅ empty state kartı padding’li kalsın
-            )
-        }
-
-        return AnyView(
+                    .padding(.horizontal, DS.s16)
+                    .padding(.top, 2)
+            }
+            .scrollIndicators(.hidden)
+            .background(Color.clear)
+            .refreshable {
+                Haptics.light()
+                vm.refresh(symbols: watchlist.symbols)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .contentShape(Rectangle())
+            .scrollContentBackground(.hidden)
+        } else {
             List {
                 ForEach(vm.rows) { r in
                     NavigationLink(value: StockDetailRoute.live(symbol: r.symbol)) {
@@ -191,10 +202,14 @@ struct FavoritesView: View {
                     }
                 }
             }
-            .listStyle(.plain)                 // ✅ insetGrouped yerine
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
-        )
+            .refreshable {
+                Haptics.light()
+                vm.refresh(symbols: watchlist.symbols)
+            }
+        }
     }
 
     private var emptyState: some View {
@@ -224,9 +239,17 @@ struct FavoritesView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
+                    .foregroundStyle(TVTheme.text)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(TVTheme.surface2)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(TVTheme.stroke, lineWidth: 1)
+                    )
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(TVTheme.up)
+                .buttonStyle(.plain)
                 .padding(.top, 4)
             }
             .frame(maxWidth: .infinity)
@@ -353,41 +376,57 @@ struct AddFavoriteSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: DS.s12) {
+            ZStack {
+                TVTheme.bg.ignoresSafeArea()
 
-                AppCard {
-                    VStack(alignment: .leading, spacing: DS.s12) {
-                        HStack {
-                            Text("Hisse Sembolü")
-                                .font(.headline)
-                            Spacer()
-                            Chip(text: "\(watchlist.symbols.count)/100", systemImage: "star.fill")
+                VStack(spacing: DS.s12) {
+                    TVCard {
+                        VStack(alignment: .leading, spacing: DS.s12) {
+                            HStack {
+                                Text("Hisse Sembolü")
+                                    .font(.headline)
+                                    .foregroundStyle(TVTheme.text)
+                                Spacer()
+                                TVChip("\(watchlist.symbols.count)/100", systemImage: "star.fill")
+                            }
+
+                            TextField(
+                                "",
+                                text: $symbol,
+                                prompt: Text("Örn: THYAO veya THYAO.IS")
+                                    .foregroundColor(Color.white.opacity(0.9))
+                            )
+                                .keyboardType(.asciiCapable)
+                                .textInputAutocapitalization(.characters)
+                                .autocorrectionDisabled()
+                                .focused($focused)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(TVTheme.surface2)
+                                .foregroundStyle(TVTheme.text)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(TVTheme.stroke, lineWidth: 1)
+                                )
+
+                            Text("THYAO yazarsan otomatik THYAO.IS olur. Yanlış sembol eklenmez.")
+                                .font(.footnote)
+                                .foregroundStyle(TVTheme.subtext)
                         }
-
-                        TextField("Örn: THYAO veya THYAO.IS", text: $symbol)
-                            .textFieldStyle(.roundedBorder)
-                            .keyboardType(.asciiCapable)
-                            .textInputAutocapitalization(.characters)
-                            .autocorrectionDisabled()
-                            .focused($focused)
-
-                        Text("THYAO yazarsan otomatik THYAO.IS olur. Yanlış sembol eklenmez.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
-                }
-                .padding(.horizontal, DS.s16)
+                    .padding(.horizontal, DS.s16)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
             .navigationTitle("Hisse Ekle")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Kapat") { dismiss() }
-                        .disabled(isValidating)
-                }
-            }
+            .navigationBarItems(
+                leading: Button("Kapat") { dismiss() }
+                    .foregroundStyle(TVTheme.up)
+                    .disabled(isValidating)
+            )
             .safeAreaInset(edge: .bottom) {
                 Button {
                     focused = false
@@ -395,7 +434,7 @@ struct AddFavoriteSheet: View {
                 } label: {
                     if isValidating {
                         HStack(spacing: 10) {
-                            ProgressView()
+                            ProgressView().tint(.white)
                             Text("Kontrol ediliyor…")
                         }
                         .frame(maxWidth: .infinity)
@@ -409,6 +448,7 @@ struct AddFavoriteSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(TVTheme.up)
                 .padding(.horizontal, DS.s16)
                 .padding(.bottom, 10)
                 .disabled(isValidating || symbol.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -416,11 +456,11 @@ struct AddFavoriteSheet: View {
             .alert(item: $alert) { a in
                 Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("Tamam")))
             }
-            .onAppear { focused = true }
-            .appScreenBackground()
+            .tvBackground()
+            .tvNavStyle()
         }
-        .presentationDetents([.medium])
-        .appScreenBackground()
+        .presentationDetents([.large])
+        .presentationBackground(TVTheme.bg)
     }
 
     private func validateAndAdd() {

@@ -13,6 +13,7 @@ enum AssetType: String, CaseIterable, Identifiable, Codable {
     case fx      // döviz
     case metal   // değerli maden
     case crypto  // kripto
+    case cash    // nakit (TRY)
 
     var id: String { rawValue }
 
@@ -23,6 +24,7 @@ enum AssetType: String, CaseIterable, Identifiable, Codable {
         case .fx: return "Döviz"
         case .metal: return "Değerli Maden"
         case .crypto: return "Kripto"
+        case .cash: return "Nakit"
         }
     }
 
@@ -34,6 +36,7 @@ enum AssetType: String, CaseIterable, Identifiable, Codable {
         case .fx: return "USDTRY=X"
         case .metal: return "GC=F"    // Gold futures (USD/oz)
         case .crypto: return "BTC-USD"
+        case .cash: return "TRY"
         }
     }
 }

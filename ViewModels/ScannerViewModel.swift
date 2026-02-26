@@ -28,6 +28,16 @@ final class ScannerViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(preset.rawValue, forKey: Keys.preset) }
     }
 
+    /// Ultra preset (Sniper/Hunter/Scout)
+    @Published var ultraPreset: UltraPreset = .hunter {
+        didSet { UserDefaults.standard.set(ultraPreset.rawValue, forKey: Keys.ultraPreset) }
+    }
+
+    /// Strateji modu seçimi: Pre-Breakout veya Ultra Bounce
+    @Published var strategyMode: ScanStrategyMode = .preBreakout {
+        didSet { UserDefaults.standard.set(strategyMode.rawValue, forKey: Keys.strategyMode) }
+    }
+
     /// 0 = all
     @Published var maxResults: Int {
         didSet {
@@ -39,6 +49,8 @@ final class ScannerViewModel: ObservableObject {
 
     private enum Keys {
         static let preset = "scan.tomorrowPreset"
+        static let ultraPreset = "scan.ultraPreset"
+        static let strategyMode = "scan.strategyMode"
         static let maxResults = "scan.maxResults"
     }
 
@@ -49,6 +61,8 @@ final class ScannerViewModel: ObservableObject {
     // MARK: - Task control
 
     private var scanTask: Task<Void, Never>?
+    private var activeUserKey: String = "guest"
+    private var activeCloudUserID: String?
 
     // Auto-scan guard (projede dursun; çağırmazsan çalışmaz)
     private var lastAutoScanAt: Date? = nil
@@ -93,8 +107,12 @@ final class ScannerViewModel: ObservableObject {
 
         let savedPresetRaw = UserDefaults.standard.string(forKey: Keys.preset)
         let savedMax = UserDefaults.standard.object(forKey: Keys.maxResults) as? Int
+        let savedUltraRaw = UserDefaults.standard.string(forKey: Keys.ultraPreset)
+        let savedModeRaw = UserDefaults.standard.string(forKey: Keys.strategyMode)
 
         self.preset = TomorrowPreset(rawValue: savedPresetRaw ?? "") ?? preset
+        self.ultraPreset = UltraPreset(rawValue: savedUltraRaw ?? "") ?? .hunter
+        self.strategyMode = ScanStrategyMode(rawValue: savedModeRaw ?? "") ?? .preBreakout
         self.maxResults = savedMax ?? maxResults
 
         self.maxResults = max(0, self.maxResults)
@@ -135,6 +153,25 @@ final class ScannerViewModel: ObservableObject {
         progressText = "Son kayıt yüklendi: \(snap.savedAt.formatted(date: .abbreviated, time: .shortened))"
         progressValue = 1
         errorText = nil
+    }
+
+    func setUserContext(localUserKey: String?, cloudUserID: String?) {
+        let cleanedLocal = sanitizeUserKey(localUserKey)
+        let normalizedCloud = cloudUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedCloud = (normalizedCloud?.isEmpty == false) ? normalizedCloud : nil
+        guard cleanedLocal != activeUserKey || cleanedCloud != activeCloudUserID else { return }
+
+        activeUserKey = cleanedLocal
+        activeCloudUserID = cleanedCloud
+
+        ScanSnapshotStore.setActiveUserKey(cleanedLocal)
+        ScanStatsStore.shared.setActiveUserKey(cleanedLocal)
+
+        cancelScan(silent: true)
+        resultsByIndex.removeAll()
+        savedAtByIndex.removeAll()
+        results = []
+        loadLastSnapshotFromDisk()
     }
 
     func deleteSnapshotAndReset() {
@@ -291,6 +328,7 @@ final class ScannerViewModel: ObservableObject {
 
         let total = symbols.count
         let sem = AsyncSemaphore(value: concurrencyLimit)
+        let mode = self.strategyMode // capture before entering task group
 
         var localResults: [ScanResult] = []
         localResults.reserveCapacity(64)
@@ -308,7 +346,13 @@ final class ScannerViewModel: ObservableObject {
                     await sem.wait()
                     await self.throttle.wait()
 
-                    let result = await self.scanOneTomorrow(symbol: symbol)
+                    let result: ScanResult?
+                    switch mode {
+                    case .preBreakout:
+                        result = await self.scanOneTomorrow(symbol: symbol)
+                    case .ultraBounce:
+                        result = await self.scanOneUltra(symbol: symbol)
+                    }
 
                     await sem.signal()
                     return result
@@ -359,15 +403,19 @@ final class ScannerViewModel: ObservableObject {
 
         // ✅ Debug özet (Xcode console)
         #if DEBUG
+        let modeLabel = strategyMode == .ultraBounce ? "Ultra Bounce" : "Pre-Breakout"
+        let presetLabel = strategyMode == .ultraBounce
+            ? "\(ultraPreset.rawValue) | minScore: \(ultraPreset.config.minScore)"
+            : "\(preset.rawValue) | minScore: \(preset.minBuyTotal)"
         print("""
         ═══════════════════════════════════════════
-        📊 TARAMA ÖZET (\(indexSnap.title))
+        📊 TARAMA ÖZET (\(indexSnap.title)) — \(modeLabel)
            Toplam sembol: \(total)
            Candle hatası: \(scanDebugCandleErrors)
            Az mum (<50): \(scanDebugLowCandles)
            Skor nil:     \(scanDebugScoreNil)
            ✅ BUY sinyal: \(scanDebugPassed)
-           Preset: \(preset.rawValue) | minScore: \(preset.minBuyTotal)
+           \(presetLabel)
         ═══════════════════════════════════════════
         """)
         #endif
@@ -447,6 +495,14 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
+    private func sanitizeUserKey(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let chars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(chars)
+        return out.isEmpty ? "guest" : out
+    }
+
     // MARK: - Single symbol scan (Tomorrow BUY-only)
 
     // Debug sayaçları
@@ -523,6 +579,68 @@ final class ScannerViewModel: ObservableObject {
             #if DEBUG
             if scanDebugCandleErrors < 3 {
                 print("📊 \(symbol): candle yükleme hatası: \(error.localizedDescription)")
+            }
+            #endif
+            scanDebugCandleErrors += 1
+            return nil
+        }
+    }
+
+    // MARK: - Single symbol scan (Ultra Bounce)
+
+    private func scanOneUltra(symbol: String) async -> ScanResult? {
+        do {
+            let candles = try await loadCandlesForScan(symbol: symbol)
+
+            guard candles.count >= 60 else {
+                #if DEBUG
+                if scanDebugLowCandles < 3 {
+                    print("📊 \(symbol): az mum (\(candles.count)) [Ultra]")
+                }
+                #endif
+                scanDebugLowCandles += 1
+                return nil
+            }
+
+            let recent = Array(candles.suffix(120))
+            let last = recent[recent.count - 1]
+            let prev = recent.count >= 2 ? recent[recent.count - 2] : last
+            let changePct = ((last.close - prev.close) / max(prev.close, 0.000001)) * 100.0
+
+            let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(60)))
+            let regime = MarketRegimeDetector.detect(from: recent)
+
+            // Ultra Bounce scoring
+            let ultra = UltraSignalScorer.score(
+                candles: recent,
+                config: ultraPreset.config,
+                regime: regime
+            )
+
+            guard let ultra else {
+                scanDebugScoreNil += 1
+                return nil
+            }
+
+            scanDebugPassed += 1
+
+            return ScanResult(
+                symbol: symbol,
+                lastDate: last.date,
+                lastClose: last.close,
+                changePct: changePct,
+                patterns: scoredPatterns,
+                tomorrowTotal: ultra.total,
+                tomorrowQuality: ultra.quality,
+                tomorrowTier: ultra.tier,
+                tomorrowReasons: ultra.reasons,
+                tomorrowBreakdown: ultra.breakdown
+            )
+
+        } catch {
+            #if DEBUG
+            if scanDebugCandleErrors < 3 {
+                print("📊 \(symbol): candle hatası [Ultra]: \(error.localizedDescription)")
             }
             #endif
             scanDebugCandleErrors += 1

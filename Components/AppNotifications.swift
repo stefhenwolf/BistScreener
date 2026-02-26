@@ -13,4 +13,6 @@ extension Notification.Name {
     static let appScanSettingsChanged = Notification.Name("appScanSettingsChanged")
     static let strategySignalConfigChanged = Notification.Name("strategySignalConfigChanged")
     static let scanSnapshotSaved = Notification.Name("scanSnapshotSaved")
+    static let strategyApprovalCommandQueued = Notification.Name("strategyApprovalCommandQueued")
+    static let appOpenDeepLink = Notification.Name("appOpenDeepLink")
 }

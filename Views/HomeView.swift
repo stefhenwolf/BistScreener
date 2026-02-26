@@ -544,8 +544,17 @@ struct HomeView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .foregroundStyle(TVTheme.text)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(TVTheme.surface2)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(TVTheme.stroke, lineWidth: 1)
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.plain)
                 }
             }
         }

@@ -643,6 +643,7 @@ struct AssetsView: View {
         case .metal: return TVTheme.warning
         case .crypto: return Color(hex: "#F7931A")
         case .fund: return Color(hex: "#7B61FF")
+        case .cash: return Color(hex: "#00C853")
         }
     }
 
@@ -655,6 +656,8 @@ struct AssetsView: View {
             symbol = asset.symbol.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         case .metal:
             symbol = yahooSymbolForMetal(asset.symbol)
+        case .cash:
+            return nil
         }
 
         guard !symbol.isEmpty else { return nil }

@@ -324,6 +324,105 @@ enum ATR {
     }
 }
 
+// MARK: - ADX (Average Directional Index)
+
+enum ADX {
+
+    /// ADX: Trend gücünü ölçer (yön bağımsız).
+    /// ADX > 25 = güçlü trend, ADX < 20 = zayıf/yatay piyasa.
+    /// Wilder'ın orijinal hesaplaması kullanılır.
+    static func calculate(candles: [Candle], period: Int = 14) -> [Double?] {
+        guard period > 0, candles.count > period * 2 + 1 else {
+            return Array(repeating: nil, count: candles.count)
+        }
+
+        // Step 1: +DM, -DM, TR hesapla
+        var plusDMs: [Double] = [0]
+        var minusDMs: [Double] = [0]
+        var trList: [Double] = [candles[0].high - candles[0].low]
+
+        for i in 1..<candles.count {
+            let highDiff = candles[i].high - candles[i - 1].high
+            let lowDiff = candles[i - 1].low - candles[i].low
+
+            let plusDM = (highDiff > lowDiff && highDiff > 0) ? highDiff : 0
+            let minusDM = (lowDiff > highDiff && lowDiff > 0) ? lowDiff : 0
+
+            plusDMs.append(plusDM)
+            minusDMs.append(minusDM)
+
+            let tr = max(
+                candles[i].high - candles[i].low,
+                abs(candles[i].high - candles[i - 1].close),
+                abs(candles[i].low - candles[i - 1].close)
+            )
+            trList.append(tr)
+        }
+
+        guard plusDMs.count > period else {
+            return Array(repeating: nil, count: candles.count)
+        }
+
+        // Step 2: Wilder smoothing → +DI, -DI, DX
+        var smoothPlusDM = plusDMs[1...period].reduce(0, +)
+        var smoothMinusDM = minusDMs[1...period].reduce(0, +)
+        var smoothTR = trList[1...period].reduce(0, +)
+
+        var dxValues: [Double] = []
+
+        for i in period..<candles.count {
+            if i > period {
+                smoothPlusDM = smoothPlusDM - (smoothPlusDM / Double(period)) + plusDMs[i]
+                smoothMinusDM = smoothMinusDM - (smoothMinusDM / Double(period)) + minusDMs[i]
+                smoothTR = smoothTR - (smoothTR / Double(period)) + trList[i]
+            }
+
+            let plusDI = smoothTR > 0 ? (smoothPlusDM / smoothTR) * 100 : 0
+            let minusDI = smoothTR > 0 ? (smoothMinusDM / smoothTR) * 100 : 0
+            let diSum = plusDI + minusDI
+            let dx = diSum > 0 ? (abs(plusDI - minusDI) / diSum) * 100 : 0
+            dxValues.append(dx)
+        }
+
+        // Step 3: DX → ADX (Wilder smoothing)
+        guard dxValues.count >= period else {
+            return Array(repeating: nil, count: candles.count)
+        }
+
+        var result: [Double?] = Array(repeating: nil, count: candles.count)
+        var adx = dxValues[0..<period].reduce(0, +) / Double(period)
+
+        let firstADXIdx = period * 2
+        if firstADXIdx < candles.count {
+            result[firstADXIdx] = adx
+        }
+
+        for i in period..<dxValues.count {
+            adx = (adx * Double(period - 1) + dxValues[i]) / Double(period)
+            let candleIdx = period + i
+            if candleIdx < candles.count {
+                result[candleIdx] = adx
+            }
+        }
+
+        return result
+    }
+
+    static func lastValue(candles: [Candle], period: Int = 14) -> Double? {
+        calculate(candles: candles, period: period).compactMap { $0 }.last
+    }
+
+    static func signalScore(adx: Double) -> (score: Int, label: String) {
+        switch adx {
+        case 40...: return (90, "Çok Güçlü Trend")
+        case 30...: return (75, "Güçlü Trend")
+        case 25...: return (60, "Trend Var")
+        case 20...: return (40, "Zayıf Trend")
+        default:    return (15, "Trend Yok")
+        }
+    }
+}
+
 // MARK: - EMA Crossover
 
 enum EMACrossover {

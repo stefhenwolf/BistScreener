@@ -3,11 +3,24 @@ import Foundation
 actor PortfolioStore {
     static let shared = PortfolioStore()
 
-    private let fileName = "portfolio_assets.json"
+    private var activeUserKey: String = "guest"
 
     private var fileURL: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return dir.appendingPathComponent(fileName)
+        return dir.appendingPathComponent("portfolio_assets_\(activeUserKey).json")
+    }
+
+    func setActiveUserKey(_ userKey: String?) {
+        let raw = userKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = sanitize(raw)
+        activeUserKey = cleaned.isEmpty ? "guest" : cleaned
+    }
+
+    private func sanitize(_ value: String?) -> String {
+        guard let value else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        return String(scalars)
     }
 
     // MARK: - Read

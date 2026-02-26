@@ -7,6 +7,8 @@ struct BacktestView: View {
 
     @State private var selectedIndex: IndexOption = .xu030
     @State private var selectedPreset: TomorrowPreset = .normal
+    @AppStorage(BacktestKeys.strategyMode) private var selectedStrategyModeRaw: String = ScanStrategyMode.preBreakout.rawValue
+    @AppStorage(BacktestKeys.ultraPreset) private var selectedUltraPresetRaw: String = UltraPreset.hunter.rawValue
 
     // ── Exit Config (Multi-Day) ──
     @AppStorage(BacktestKeys.tp1Pct) private var tp1Pct: Double = 5.0
@@ -16,6 +18,7 @@ struct BacktestView: View {
     @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
     @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
+    @AppStorage(BacktestKeys.minPerPositionTL) private var minPerPositionTL: Double = 400
     @AppStorage(BacktestKeys.maxPerPositionTL) private var maxPerPositionTL: Double = 5_000
     @AppStorage(BacktestKeys.addOnMode) private var addOnMode: Int = 0
     @AppStorage(BacktestKeys.addOnWaitDays) private var addOnWaitDays: Double = 5
@@ -42,6 +45,14 @@ struct BacktestView: View {
             addOnMode: BacktestAddOnMode(rawValue: addOnMode) ?? .off,
             addOnWaitDays: Int(addOnWaitDays)
         )
+    }
+
+    private var selectedStrategyMode: ScanStrategyMode {
+        ScanStrategyMode(rawValue: selectedStrategyModeRaw) ?? .preBreakout
+    }
+
+    private var selectedUltraPreset: UltraPreset {
+        UltraPreset(rawValue: selectedUltraPresetRaw) ?? .hunter
     }
 
     var body: some View {
@@ -95,7 +106,11 @@ struct BacktestView: View {
             stopLossPct = min(max(stopLossPct, 2), 15)
             maxHoldDays = min(max(maxHoldDays, 5), 60)
             cooldownDays = min(max(cooldownDays, 0), 10)
-            maxPerPositionTL = min(max(maxPerPositionTL, 1_000), hardMaxPerPositionTL)
+            minPerPositionTL = min(max(minPerPositionTL, 100), hardMaxPerPositionTL)
+            maxPerPositionTL = min(max(maxPerPositionTL, 100), hardMaxPerPositionTL)
+            if minPerPositionTL > maxPerPositionTL {
+                minPerPositionTL = maxPerPositionTL
+            }
             addOnMode = min(max(addOnMode, 0), 2)
             addOnWaitDays = min(max(addOnWaitDays, 1), 30)
             recomputePortfolioSimulation()
@@ -103,7 +118,12 @@ struct BacktestView: View {
         .onChange(of: engine.summary.totalSignals) { _ in
             recomputePortfolioSimulation()
         }
+        .onChange(of: minPerPositionTL) { _ in
+            if minPerPositionTL > maxPerPositionTL { minPerPositionTL = maxPerPositionTL }
+            recomputePortfolioSimulation()
+        }
         .onChange(of: maxPerPositionTL) { _ in
+            if maxPerPositionTL < minPerPositionTL { maxPerPositionTL = minPerPositionTL }
             recomputePortfolioSimulation()
         }
         .onDisappear {
@@ -168,9 +188,44 @@ struct BacktestView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .disabled(selectedStrategyMode != .preBreakout)
+                    .opacity(selectedStrategyMode == .preBreakout ? 1 : 0.45)
                 }
 
-                Text("v2: Tüm presetler non-linear scoring kullanır. Lookback preset'e göre otomatik.")
+                HStack(spacing: 12) {
+                    Text("Strateji")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(TVTheme.subtext)
+
+                    Picker("Strateji", selection: Binding(
+                        get: { selectedStrategyMode },
+                        set: { selectedStrategyModeRaw = $0.rawValue }
+                    )) {
+                        Text("Pre-Breakout").tag(ScanStrategyMode.preBreakout)
+                        Text("Ultra Bounce").tag(ScanStrategyMode.ultraBounce)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if selectedStrategyMode == .ultraBounce {
+                    HStack(spacing: 12) {
+                        Text("Ultra Preset")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(TVTheme.subtext)
+
+                        Picker("Ultra Preset", selection: Binding(
+                            get: { selectedUltraPreset },
+                            set: { selectedUltraPresetRaw = $0.rawValue }
+                        )) {
+                            Text("Sniper").tag(UltraPreset.sniper)
+                            Text("Hunter").tag(UltraPreset.hunter)
+                            Text("Scout").tag(UltraPreset.scout)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+
+                Text("Backtest sinyal modu: Pre-Breakout veya Ultra Bounce. Ultra modda Sniper/Hunter/Scout eşikleri kullanılır.")
                     .font(.footnote)
                     .foregroundStyle(TVTheme.subtext)
             }
@@ -243,10 +298,18 @@ struct BacktestView: View {
                 )
 
                 sliderRow(
+                    title: "💵 Hisse Başı Min",
+                    value: $minPerPositionTL,
+                    range: 100...5_000,
+                    step: 100,
+                    format: "₺%.0f"
+                )
+
+                sliderRow(
                     title: "💵 Hisse Başı Max",
                     value: $maxPerPositionTL,
-                    range: 1_000...5_000,
-                    step: 500,
+                    range: 100...5_000,
+                    step: 100,
                     format: "₺%.0f"
                 )
 
@@ -282,11 +345,12 @@ struct BacktestView: View {
                     miniChip("TP1 Sat %\(Int(tp1SellPercent))", TVTheme.subtext)
                     miniChip("SL -\(String(format: "%.1f", stopLossPct))%", TVTheme.down)
                     miniChip("\(Int(maxHoldDays))g", TVTheme.subtext)
+                    miniChip("Min ₺\(Int(minPerPositionTL))", TVTheme.subtext)
                     miniChip("Max ₺\(Int(maxPerPositionTL))", TVTheme.subtext)
                     miniChip(addOnModeLabel, TVTheme.subtext)
                 }
 
-                Text("Sinyal günü kapanışta giriş → TP1'de kısmi satış, TP2/SL/MaxDays ile kalan lot yönetimi. Nakit, o günün önerilerine tek tur eşit paylaştırılır; hisse başı üst limit ₺5.000.")
+                Text("Sinyal günü kapanışta giriş → TP1'de kısmi satış, TP2/SL/MaxDays ile kalan lot yönetimi. Nakit o günün önerilerine tek tur paylaştırılır; hisse başı min/max tutarları uygulanır.")
                     .font(.footnote)
                     .foregroundStyle(TVTheme.subtext)
             }
@@ -327,6 +391,8 @@ struct BacktestView: View {
                 engine.run(
                     indexOption: selectedIndex,
                     preset: selectedPreset,
+                    strategyMode: selectedStrategyMode,
+                    ultraPreset: selectedUltraPreset,
                     exitConfig: exitConfig,
                     portfolioConfig: portfolioConfig
                 )
@@ -536,6 +602,7 @@ struct BacktestView: View {
                                  color: result.annualizedReturnPct >= 0 ? TVTheme.up : TVTheme.down)
                         statCell("Yatırım Yapılan", "\(result.investedSignals)")
                         statCell("Toplam Sinyal", "\(result.totalSignals)")
+                        statCell("Hisse Başı Min", String(format: "₺%.0f", minPerPositionTL))
                         statCell("Hisse Başı Max", String(format: "₺%.0f", maxPerPositionTL))
                         statCell("Atlanan", "\(result.skippedSignals)", color: result.skippedSignals > 0 ? .orange : TVTheme.text)
                         statCell("Açık Pozisyon", "\(result.openPositions)")
@@ -543,7 +610,7 @@ struct BacktestView: View {
                         statCell("Nakit", String(format: "₺%.0f", max(0, result.endingCash)))
                     }
 
-                    Text("Varsayım: Kaldıraç yok. Her gün önce çıkışlar işlenir, sonra o günün al sinyallerine nakit eşit paylaştırılır. Hisse başı max limiti uygulanır.")
+                    Text("Varsayım: Kaldıraç yok. Her gün önce çıkışlar işlenir, sonra o günün al sinyallerine nakit paylaştırılır. Hisse başı min/max limiti uygulanır.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(TVTheme.subtext)
 
@@ -698,6 +765,7 @@ struct BacktestView: View {
     nonisolated private static func simulatePortfolioFromSignals(
         initialCapital: Double,
         trades: [BacktestTradeResult],
+        minPerPositionTL: Double,
         maxPerPositionTL: Double,
         hardMaxPerPositionTL: Double
     ) -> PortfolioSimulationResult {
@@ -799,6 +867,7 @@ struct BacktestView: View {
                 if !eligible.isEmpty {
                     let allocation = cash / Double(eligible.count)
                     let perSymbolCap = min(maxPerPositionTL, hardMaxPerPositionTL)
+                    let perSymbolMin = min(max(0, minPerPositionTL), perSymbolCap)
 
                     for t in eligible {
                         if cash <= 0 {
@@ -818,8 +887,8 @@ struct BacktestView: View {
                         }
 
                         let entryDay = cal.startOfDay(for: t.entryDate)
-                        let invest = min(perSymbolCap, allocation, cash)
-                        if invest <= 0 {
+                        let investCap = min(perSymbolCap, allocation, cash)
+                        if investCap < perSymbolMin || investCap <= 0 {
                             skippedSignals += 1
                             appendEvent(
                                 PortfolioEvent(
@@ -828,12 +897,13 @@ struct BacktestView: View {
                                     symbol: t.symbol,
                                     amountTL: 0,
                                     cashAfterTL: cash,
-                                    note: "Nakit yok",
+                                    note: "Min alım (\(String(format: "₺%.0f", perSymbolMin))) sağlanamadı",
                                     holdingsText: holdingsSummaryText(open)
                                 )
                             )
                             continue
                         }
+                        let invest = investCap
 
                         cash -= invest
                         let lots = t.entryPrice > 0 ? (invest / t.entryPrice) : 0
@@ -935,6 +1005,7 @@ struct BacktestView: View {
 
         let trades = engine.summary.trades
         let initialCapital = initialCapitalTL
+        let minPerPosition = minPerPositionTL
         let maxPerPosition = maxPerPositionTL
         let hardMax = hardMaxPerPositionTL
         isComputingPortfolioSimulation = true
@@ -943,6 +1014,7 @@ struct BacktestView: View {
             let result = BacktestView.simulatePortfolioFromSignals(
                 initialCapital: initialCapital,
                 trades: trades,
+                minPerPositionTL: minPerPosition,
                 maxPerPositionTL: maxPerPosition,
                 hardMaxPerPositionTL: hardMax
             )

@@ -175,12 +175,12 @@ struct LiveStrategyHolding: Identifiable, Codable {
     }
 }
 
-enum LiveStrategyPendingActionKind: String, Codable {
+enum LiveStrategyPendingActionKind: String, Codable, Equatable {
     case buy
     case sell
 }
 
-struct LiveStrategyPendingAction: Identifiable, Codable {
+struct LiveStrategyPendingAction: Identifiable, Codable, Equatable {
     let id: UUID
     let createdAt: Date
     let kind: LiveStrategyPendingActionKind
@@ -219,7 +219,10 @@ struct LiveStrategyPendingAction: Identifiable, Codable {
 
 struct LiveStrategySettings: Codable, Equatable {
     var indexOption: IndexOption = .xu030
+    var strategyMode: ScanStrategyMode = .preBreakout
     var preset: TomorrowPreset = .normal
+    var ultraPreset: UltraPreset = .hunter
+    var minPerPositionTL: Double = 400
     var maxPerPositionTL: Double = 5_000
     var maxOpenPositions: Int = 8
     var tp1Pct: Double = 5
@@ -233,7 +236,10 @@ struct LiveStrategySettings: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case indexOption
+        case strategyMode
         case preset
+        case ultraPreset
+        case minPerPositionTL
         case maxPerPositionTL
         case maxOpenPositions
         case tp1Pct
@@ -252,7 +258,10 @@ struct LiveStrategySettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         indexOption = try c.decodeIfPresent(IndexOption.self, forKey: .indexOption) ?? indexOption
+        strategyMode = try c.decodeIfPresent(ScanStrategyMode.self, forKey: .strategyMode) ?? strategyMode
         preset = try c.decodeIfPresent(TomorrowPreset.self, forKey: .preset) ?? preset
+        ultraPreset = try c.decodeIfPresent(UltraPreset.self, forKey: .ultraPreset) ?? ultraPreset
+        minPerPositionTL = try c.decodeIfPresent(Double.self, forKey: .minPerPositionTL) ?? minPerPositionTL
         maxPerPositionTL = try c.decodeIfPresent(Double.self, forKey: .maxPerPositionTL) ?? maxPerPositionTL
         maxOpenPositions = try c.decodeIfPresent(Int.self, forKey: .maxOpenPositions) ?? maxOpenPositions
         let legacyTP = try c.decodeIfPresent(Double.self, forKey: .takeProfitPct) ?? tp2Pct
@@ -269,7 +278,10 @@ struct LiveStrategySettings: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(indexOption, forKey: .indexOption)
+        try c.encode(strategyMode, forKey: .strategyMode)
         try c.encode(preset, forKey: .preset)
+        try c.encode(ultraPreset, forKey: .ultraPreset)
+        try c.encode(minPerPositionTL, forKey: .minPerPositionTL)
         try c.encode(maxPerPositionTL, forKey: .maxPerPositionTL)
         try c.encode(maxOpenPositions, forKey: .maxOpenPositions)
         try c.encode(tp1Pct, forKey: .tp1Pct)
@@ -285,7 +297,11 @@ struct LiveStrategySettings: Codable, Equatable {
 
     func clamped() -> LiveStrategySettings {
         var out = self
-        out.maxPerPositionTL = min(max(out.maxPerPositionTL, 1_000), 10_000)
+        out.minPerPositionTL = min(max(out.minPerPositionTL, 100), 5_000)
+        out.maxPerPositionTL = min(max(out.maxPerPositionTL, 100), 10_000)
+        if out.minPerPositionTL > out.maxPerPositionTL {
+            out.minPerPositionTL = out.maxPerPositionTL
+        }
         out.maxOpenPositions = min(max(out.maxOpenPositions, 1), 25)
         out.tp2Pct = min(max(out.tp2Pct, 4), 40)
         out.tp1Pct = min(max(out.tp1Pct, 1), 30)
@@ -340,8 +356,16 @@ final class LiveStrategyStore: ObservableObject {
     @Published private(set) var cashTL: Double = 100_000
     @Published private(set) var holdings: [LiveStrategyHolding] = []
     @Published private(set) var events: [LiveStrategyEvent] = []
-    @Published private(set) var pendingActions: [LiveStrategyPendingAction] = []
+    @Published private(set) var pendingActions: [LiveStrategyPendingAction] = [] {
+        didSet {
+            guard !isHydrating else { return }
+            StrategyNotificationManager.shared.syncPendingActions(pendingActions)
+            publishWidgetSnapshot()
+        }
+    }
     @Published private(set) var skipBuyUntil: Date?
+    @Published private(set) var lastBuyWindowRunAt: Date?
+    private var lastScannedBuySymbols: [String] = []
     private var portfolioContributionsByAssetID: [UUID: StrategyPortfolioContributionRecord] = [:]
 
     private struct Snapshot: Codable {
@@ -356,6 +380,8 @@ final class LiveStrategyStore: ObservableObject {
         let events: [LiveStrategyEvent]
         let pendingActions: [LiveStrategyPendingAction]
         let skipBuyUntil: Date?
+        let lastBuyWindowRunAt: Date?
+        let lastScannedBuySymbols: [String]
         let portfolioContributions: [StrategyPortfolioContributionRecord]
 
         init(
@@ -370,6 +396,8 @@ final class LiveStrategyStore: ObservableObject {
             events: [LiveStrategyEvent],
             pendingActions: [LiveStrategyPendingAction],
             skipBuyUntil: Date?,
+            lastBuyWindowRunAt: Date?,
+            lastScannedBuySymbols: [String],
             portfolioContributions: [StrategyPortfolioContributionRecord]
         ) {
             self.isRunning = isRunning
@@ -383,6 +411,8 @@ final class LiveStrategyStore: ObservableObject {
             self.events = events
             self.pendingActions = pendingActions
             self.skipBuyUntil = skipBuyUntil
+            self.lastBuyWindowRunAt = lastBuyWindowRunAt
+            self.lastScannedBuySymbols = lastScannedBuySymbols
             self.portfolioContributions = portfolioContributions
         }
 
@@ -399,6 +429,8 @@ final class LiveStrategyStore: ObservableObject {
             events = try c.decode([LiveStrategyEvent].self, forKey: .events)
             pendingActions = try c.decodeIfPresent([LiveStrategyPendingAction].self, forKey: .pendingActions) ?? []
             skipBuyUntil = try c.decodeIfPresent(Date.self, forKey: .skipBuyUntil)
+            lastBuyWindowRunAt = try c.decodeIfPresent(Date.self, forKey: .lastBuyWindowRunAt)
+            lastScannedBuySymbols = try c.decodeIfPresent([String].self, forKey: .lastScannedBuySymbols) ?? []
             portfolioContributions = try c.decodeIfPresent([StrategyPortfolioContributionRecord].self, forKey: .portfolioContributions) ?? []
         }
     }
@@ -428,28 +460,101 @@ final class LiveStrategyStore: ObservableObject {
         case historicalBootstrap
     }
 
-    private let snapshotKey = "live.strategy.snapshot.v1"
+    private let snapshotKeyPrefix = "live.strategy.snapshot.v1"
     private let maxStoredEvents = 300
     private let maxStoredPendingActions = 120
 
     private let yahoo: YahooFinanceService
     private let indexService: BorsaIstanbulIndexService
     private let portfolioVM: PortfolioViewModel
+    private let cloudRepository: any CloudDataRepository
+    private var cloudUserID: String?
+    private var localStorageUserKey: String = "guest"
+    private var didAttemptCloudHydrate = false
     private var autoLoopTask: Task<Void, Never>?
     private var configRefreshTask: Task<Void, Never>?
     private var notificationObservers: [NSObjectProtocol] = []
     private var isHydrating = true
 
-    init(yahoo: YahooFinanceService, indexService: BorsaIstanbulIndexService, portfolioVM: PortfolioViewModel) {
+    init(
+        yahoo: YahooFinanceService,
+        indexService: BorsaIstanbulIndexService,
+        portfolioVM: PortfolioViewModel,
+        cloudRepository: any CloudDataRepository = NoopCloudDataRepository()
+    ) {
         self.yahoo = yahoo
         self.indexService = indexService
         self.portfolioVM = portfolioVM
+        self.cloudRepository = cloudRepository
         restore()
         isHydrating = false
         registerObservers()
         if isRunning {
             startAutoLoop()
         }
+        StrategyNotificationManager.shared.syncPendingActions(pendingActions)
+        publishWidgetSnapshot()
+    }
+
+    func setCloudUserID(_ userID: String?) {
+        let normalized = userID?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clean = (normalized?.isEmpty == false) ? normalized : nil
+        let newLocalKey = sanitizedStorageKey(clean)
+        let userChanged = cloudUserID != clean || localStorageUserKey != newLocalKey
+        guard userChanged else { return }
+        cloudUserID = clean
+        localStorageUserKey = newLocalKey
+        didAttemptCloudHydrate = false
+        clearInMemoryState()
+        restore()
+        if isRunning {
+            startAutoLoop()
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await PortfolioStore.shared.setActiveUserKey(self.localStorageUserKey)
+            let hydratedFromCloud = await self.hydrateFromCloudIfNeeded(force: true)
+            if !hydratedFromCloud {
+                // Cloud’da henüz veri yoksa yerel cache’i ilk kez yukarı taşı.
+                await self.syncSnapshotToCloud()
+                await self.syncPortfolioToCloud()
+            }
+            await MainActor.run {
+                self.portfolioVM.loadFromDiskAndRefresh()
+            }
+        }
+    }
+
+    private func sanitizedStorageKey(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "guest" }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let scalars = value.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" }
+        let out = String(scalars)
+        return out.isEmpty ? "guest" : out
+    }
+
+    private var snapshotKey: String {
+        "\(snapshotKeyPrefix).\(localStorageUserKey)"
+    }
+
+    private func clearInMemoryState() {
+        autoLoopTask?.cancel()
+        autoLoopTask = nil
+        isRunning = false
+        isRefreshing = false
+        errorText = nil
+        startedAt = nil
+        lastUpdated = nil
+        sourceSnapshotDate = nil
+        initialCapitalTL = 100_000
+        cashTL = 100_000
+        holdings = []
+        events = []
+        pendingActions = []
+        skipBuyUntil = nil
+        lastBuyWindowRunAt = nil
+        lastScannedBuySymbols = []
+        portfolioContributionsByAssetID = [:]
     }
 
     deinit {
@@ -492,6 +597,8 @@ final class LiveStrategyStore: ObservableObject {
         events = []
         pendingActions = []
         skipBuyUntil = nil
+        lastBuyWindowRunAt = nil
+        lastScannedBuySymbols = []
         portfolioContributionsByAssetID.removeAll()
         startedAt = clampedStart
         sourceSnapshotDate = nil
@@ -504,11 +611,15 @@ final class LiveStrategyStore: ObservableObject {
         Task {
             let trigger: RefreshTrigger = cal.isDate(startDay, inSameDayAs: now) ? .manual : .historicalBootstrap
             await refreshNow(trigger: trigger)
+            if trigger == .historicalBootstrap {
+                await refreshNow(trigger: .manual)
+            }
         }
     }
 
     func stopStrategy() {
         let contributions = Array(portfolioContributionsByAssetID.values)
+        let heldSymbols = Set(holdings.map { $0.symbol.normalizedBISTSymbol() })
         isRunning = false
         autoLoopTask?.cancel()
         autoLoopTask = nil
@@ -516,6 +627,8 @@ final class LiveStrategyStore: ObservableObject {
         events = []
         pendingActions = []
         skipBuyUntil = nil
+        lastBuyWindowRunAt = nil
+        lastScannedBuySymbols = []
         cashTL = initialCapitalTL
         startedAt = nil
         lastUpdated = nil
@@ -523,13 +636,15 @@ final class LiveStrategyStore: ObservableObject {
         errorText = nil
         persist()
 
-        guard !contributions.isEmpty else {
-            return
-        }
-
         Task { [weak self] in
             guard let self else { return }
-            await self.rollbackPortfolioContributions(contributions)
+            if !contributions.isEmpty {
+                await self.rollbackPortfolioContributions(contributions)
+                return
+            }
+            guard !heldSymbols.isEmpty else { return }
+            // Fallback: eski kayıtlarda contribution yoksa strateji sembollerini portföyden kaldır.
+            self.portfolioVM.deleteBySymbols(Array(heldSymbols))
         }
     }
 
@@ -541,6 +656,7 @@ final class LiveStrategyStore: ObservableObject {
         events = []
         pendingActions = []
         skipBuyUntil = nil
+        lastScannedBuySymbols = []
         portfolioContributionsByAssetID.removeAll()
         startedAt = nil
         lastUpdated = nil
@@ -589,46 +705,67 @@ final class LiveStrategyStore: ObservableObject {
                 return
             }
             let now = wallClockNow
-            let enforceDailyMorningWindow = (trigger == .manual || trigger == .autoSchedule)
-            if enforceDailyMorningWindow {
-                if !Self.isMorningExecutionWindow(now: wallClockNow) {
-                    errorText = "Strateji işlemleri günlük 17:00 seansında çalışır."
-                    return
-                }
-                if let lastUpdated, Calendar.current.isDate(lastUpdated, inSameDayAs: wallClockNow) {
-                    errorText = "Bugün strateji zaten çalıştı. Bir sonraki çalıştırma yarın 17:00."
-                    return
-                }
+            if !Self.isMarketSessionOpen(now: wallClockNow) {
+                errorText = "Piyasa kapalı (10:00-18:00)."
+                return
             }
             if !isHistoricalBootstrap, Self.isAfterMarketClose(now: wallClockNow) {
+                let startedToday = startedAt.map { Calendar.current.isDate($0, inSameDayAs: wallClockNow) } ?? false
+                let hasPendingBuy = pendingActions.contains { $0.kind == .buy }
+                if startedToday && hasPendingBuy {
+                    isRunning = false
+                    autoLoopTask?.cancel()
+                    autoLoopTask = nil
+                    errorText = "Bugün başlatılan stratejide AL onayı gelmediği için strateji duraklatıldı."
+                    return
+                }
                 errorText = "Borsa kapalı (18:00 sonrası). İşlemler bir sonraki seansta uygulanır."
-                pendingActions.removeAll { $0.kind == .sell }
                 return
             }
             let snapshot = try ScanSnapshotStore.load(forIndexRaw: settings.indexOption.rawValue)
             sourceSnapshotDate = snapshot.savedAt
             normalizeBuyFreeze(now: wallClockNow)
             let buyCutoffPassed = Self.isBuyCutoffPassed(now: wallClockNow) || isBuyFreezeActive(now: wallClockNow)
+            let alreadyRanBuyToday = lastBuyWindowRunAt.map { Calendar.current.isDate($0, inSameDayAs: wallClockNow) } ?? false
+            let allowBuyCycle = !buyCutoffPassed && !alreadyRanBuyToday
             if buyCutoffPassed {
                 if isBuyFreezeActive(now: wallClockNow) {
                     errorText = "Geçmiş başlatma sonrası bugün yeni AL kapalı. Strateji yarın devam eder."
                 } else {
                     errorText = "Canlı stratejide AL/ekleme sadece 17:00-18:00 arası yapılır."
                 }
+            } else if alreadyRanBuyToday {
+                errorText = "Bugün AL taraması tamamlandı. SL/TP/Süre takibi devam ediyor."
             }
 
-            if !settings.requireTradeConfirmation, !pendingActions.isEmpty {
-                let pendingIDs = pendingActions.map(\.id)
-                for id in pendingIDs {
-                    await approvePendingActionNow(id)
+            await autoApproveDueSellActions(now: now)
+
+            let scoredCandidatesCount = snapshot.results.reduce(0) { acc, row in
+                acc + (row.tomorrowTotal == nil ? 0 : 1)
+            }
+            let minBuyScore = settings.strategyMode == .ultraBounce
+                ? settings.ultraPreset.config.minScore
+                : settings.preset.minBuyTotal
+            let tierFilteredCandidatesCount = snapshot.results.reduce(0) { acc, row in
+                guard let score = row.tomorrowTotal else { return acc }
+                if score < minBuyScore { return acc }
+                if settings.strategyMode == .preBreakout,
+                   !settings.preset.allowsTierC,
+                   row.tomorrowTier == .c {
+                    return acc
                 }
+                return acc + 1
             }
 
             let candidates = snapshot.results
                 .compactMap { row -> SignalCandidate? in
                     guard let score = row.tomorrowTotal else { return nil }
-                    if score < settings.preset.minBuyTotal { return nil }
-                    if !settings.preset.allowsTierC, row.tomorrowTier == .c { return nil }
+                    if score < minBuyScore { return nil }
+                    if settings.strategyMode == .preBreakout,
+                       !settings.preset.allowsTierC,
+                       row.tomorrowTier == .c {
+                        return nil
+                    }
                     return SignalCandidate(
                         symbol: row.symbol.normalizedBISTSymbol(),
                         score: score,
@@ -649,6 +786,7 @@ final class LiveStrategyStore: ObservableObject {
             )
             guard isRunning else { return }
             let buySymbolSet = Set(candidates.map(\.symbol))
+            reportBuyUniverseChanges(currentSymbols: buySymbolSet, now: now)
             sanitizePendingActions(
                 openSymbols: Set(holdings.map(\.symbol)),
                 buyCandidates: buySymbolSet
@@ -764,55 +902,63 @@ final class LiveStrategyStore: ObservableObject {
             var reservedCash = pendingReservedCashTL()
             var spendableCash = max(0, cashTL - reservedCash)
 
-            if !buyCutoffPassed, spendableCash > 0 {
+            if allowBuyCycle, spendableCash > 0 {
                 let buyCandidatesAll = candidates.filter { candidate in
                     !hasPendingAction(kind: .buy, symbol: candidate.symbol)
                 }
                 let addOnCandidates = buyCandidatesAll.filter { openSymbols.contains($0.symbol) }
                 let newCandidates = buyCandidatesAll.filter { !openSymbols.contains($0.symbol) }
 
+                let minSpend = max(1.0, settings.minPerPositionTL)
+                let affordableCount = max(0, Int(floor(spendableCash / minSpend)))
                 let selectedAddOns = addOnCandidates
                 let selectedNew = Array(newCandidates.prefix(openSlots))
-                let selected = selectedAddOns + selectedNew
+                let selected = Array((selectedAddOns + selectedNew).prefix(affordableCount))
+
+                appendEvent(
+                    LiveStrategyEvent(
+                        date: now,
+                        kind: .skip,
+                        symbol: "GENEL",
+                        amountTL: 0,
+                        cashAfterTL: cashTL,
+                        note: """
+                        AL tanı
+                        Toplam: \(snapshot.results.count)
+                        Skorlu: \(scoredCandidatesCount)
+                        Tier: \(tierFilteredCandidatesCount)
+                        Eşik≥\(minBuyScore): \(candidates.count)
+                        Min/Max: \(String(format: "₺%.0f/₺%.0f", settings.minPerPositionTL, settings.maxPerPositionTL))
+                        Slot: \(openSlots) • Elde: \(openSymbols.count)
+                        Ek aday: \(addOnCandidates.count) • Yeni aday: \(newCandidates.count)
+                        Seçilen: \(selected.count)
+                        """,
+                        holdingsText: holdingsSummary(from: nextHoldings)
+                    )
+                )
 
                 if !selected.isEmpty {
-                    let equalBudget = min(settings.maxPerPositionTL, spendableCash / Double(selected.count))
-
+                    var hadMinCashShortfall = false
+                    var acceptedBuyAction = false
                     for c in selected {
+                        if spendableCash < settings.minPerPositionTL {
+                            break
+                        }
                         let px = max(0.0001, quotes[c.symbol] ?? c.close)
-                        let budget = min(equalBudget, spendableCash)
-
-                        if budget <= 0 {
-                            appendEvent(
-                                LiveStrategyEvent(
-                                    date: now,
-                                    kind: .skip,
-                                    symbol: c.symbol,
-                                    amountTL: 0,
-                                    cashAfterTL: cashTL,
-                                    note: "Nakit yok",
-                                    holdingsText: holdingsSummary(from: nextHoldings)
-                                )
-                            )
+                        let budgetCap = min(settings.maxPerPositionTL, spendableCash)
+                        if budgetCap <= 0 {
                             continue
                         }
-
-                        let qty = floor(budget / px)
-                        guard qty >= 1 else {
-                            appendEvent(
-                                LiveStrategyEvent(
-                                    date: now,
-                                    kind: .skip,
-                                    symbol: c.symbol,
-                                    amountTL: 0,
-                                    cashAfterTL: cashTL,
-                                    note: "1 lot için nakit yetersiz",
-                                    holdingsText: holdingsSummary(from: nextHoldings)
-                                )
-                            )
+                        guard let order = Self.resolveBuyOrder(
+                            price: px,
+                            budgetCap: budgetCap,
+                            minSpendTL: settings.minPerPositionTL
+                        ) else {
+                            hadMinCashShortfall = true
                             continue
                         }
-                        let spent = qty * px
+                        let qty = order.quantity
+                        let spent = order.spentTL
                         let existingHolding = nextHoldings.first(where: { $0.symbol == c.symbol })
                         let isAddOn = (existingHolding != nil)
                         let projectedAvgCost: Double = {
@@ -842,6 +988,7 @@ final class LiveStrategyStore: ObservableObject {
                                     signalQuality: c.quality
                                 )
                             )
+                            acceptedBuyAction = true
                             reservedCash += spent
                             spendableCash = max(0, cashTL - reservedCash)
                         } else {
@@ -882,6 +1029,7 @@ final class LiveStrategyStore: ObservableObject {
                                 nextHoldings.append(newHolding)
                             }
                             buysToPortfolio.append((symbol: c.symbol, quantity: qty, price: px))
+                            acceptedBuyAction = true
 
                             appendEvent(
                                 LiveStrategyEvent(
@@ -896,6 +1044,19 @@ final class LiveStrategyStore: ObservableObject {
                             )
                             spendableCash = max(0, spendableCash - spent)
                         }
+                    }
+                    if !acceptedBuyAction, hadMinCashShortfall {
+                        appendEvent(
+                            LiveStrategyEvent(
+                                date: now,
+                                kind: .skip,
+                                symbol: "GENEL",
+                                amountTL: 0,
+                                cashAfterTL: cashTL,
+                                note: "Min alım (\(String(format: "₺%.0f", settings.minPerPositionTL))) için nakit yetersiz",
+                                holdingsText: holdingsSummary(from: nextHoldings)
+                            )
+                        )
                     }
                 } else {
                     let reason: String
@@ -936,6 +1097,9 @@ final class LiveStrategyStore: ObservableObject {
             }
 
             holdings = nextHoldings.sorted { $0.marketValueTL > $1.marketValueTL }
+            if allowBuyCycle {
+                lastBuyWindowRunAt = now
+            }
             sanitizePendingActions(
                 openSymbols: Set(holdings.map(\.symbol)),
                 buyCandidates: buySymbolSet
@@ -1005,6 +1169,33 @@ final class LiveStrategyStore: ObservableObject {
         persist()
     }
 
+    private func autoApproveDueSellActions(now: Date) async {
+        guard settings.requireTradeConfirmation else { return }
+        guard Self.isMarketSessionOpen(now: now) else { return }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: now)
+        let dueSellIDs = pendingActions.compactMap { action -> UUID? in
+            guard action.kind == .sell else { return nil }
+            let actionDay = cal.startOfDay(for: action.createdAt)
+            let isTodayAction = (actionDay == today)
+
+            // Bugün oluşan SAT emirleri daima manuel onaylı kalsın.
+            // Kullanıcı onayı yalnızca seans içinde (10:00-18:00) verilebilir.
+            if isTodayAction {
+                return nil
+            }
+            let dueAt = Self.randomizedSellExecutionTime(
+                on: Calendar.current.startOfDay(for: action.createdAt),
+                symbol: action.symbol
+            )
+            return now >= dueAt ? action.id : nil
+        }
+        guard !dueSellIDs.isEmpty else { return }
+        for id in dueSellIDs {
+            await approvePendingActionNow(id)
+        }
+    }
+
     private func approvePendingActionNow(_ actionID: UUID) async {
         guard let idx = pendingActions.firstIndex(where: { $0.id == actionID }) else { return }
         let now = Date()
@@ -1017,17 +1208,24 @@ final class LiveStrategyStore: ObservableObject {
             return
         }
         let action = pendingActions[idx]
-        if action.kind == .buy, Self.isBuyCutoffPassed(now: now) {
-            errorText = "Canlı stratejide AL onayı sadece 17:00-18:00 arası yapılır."
-            return
+        if action.kind == .buy {
+            let hour = Calendar.current.component(.hour, from: now)
+            if hour < 17 {
+                errorText = "AL onayı 10:00-18:00 arası yapılabilir, ancak 17:00 sonrası genelde daha uygundur."
+            }
         }
+        let approvalPrice = await Self.fetchApprovalPrice(
+            yahoo: yahoo,
+            symbol: action.symbol,
+            fallback: action.priceTL
+        )
         _ = pendingActions.remove(at: idx)
 
         switch action.kind {
         case .buy:
-            await executeApprovedBuy(action, now: now)
+            await executeApprovedBuy(action, now: now, approvalPrice: approvalPrice)
         case .sell:
-            await executeApprovedSell(action, now: now)
+            await executeApprovedSell(action, now: now, approvalPrice: approvalPrice)
         }
 
         holdings.sort { $0.marketValueTL > $1.marketValueTL }
@@ -1035,9 +1233,14 @@ final class LiveStrategyStore: ObservableObject {
         persist()
     }
 
-    private func executeApprovedBuy(_ action: LiveStrategyPendingAction, now: Date) async {
-        let livePrice = await Self.fetchLastClose(yahoo: yahoo, symbol: action.symbol) ?? action.priceTL
+    private func executeApprovedBuy(
+        _ action: LiveStrategyPendingAction,
+        now: Date,
+        approvalPrice: Double
+    ) async {
+        let livePrice = max(0.0001, approvalPrice)
         guard livePrice > 0 else { return }
+        let approvalTime = now.formatted(date: .omitted, time: .shortened)
         let budget = min(action.amountTL, cashTL)
         guard budget > 0 else {
             appendEvent(
@@ -1053,9 +1256,11 @@ final class LiveStrategyStore: ObservableObject {
             )
             return
         }
-
-        let qty = floor(budget / livePrice)
-        guard qty >= 1 else {
+        guard let order = Self.resolveBuyOrder(
+            price: livePrice,
+            budgetCap: budget,
+            minSpendTL: settings.minPerPositionTL
+        ) else {
             appendEvent(
                 LiveStrategyEvent(
                     date: now,
@@ -1063,13 +1268,14 @@ final class LiveStrategyStore: ObservableObject {
                     symbol: action.symbol,
                     amountTL: 0,
                     cashAfterTL: cashTL,
-                    note: "Onaylı AL atlandı • 1 lot için nakit yetersiz",
+                    note: "Onaylı AL atlandı • Min alım (\(String(format: "₺%.0f", settings.minPerPositionTL))) için nakit yetersiz",
                     holdingsText: holdingsSummary(from: holdings)
                 )
             )
             return
         }
-        let spent = qty * livePrice
+        let qty = order.quantity
+        let spent = order.spentTL
 
         cashTL -= spent
         let isAddOn: Bool
@@ -1115,8 +1321,8 @@ final class LiveStrategyStore: ObservableObject {
         let tp1Base = holdings.first(where: { $0.symbol == action.symbol })?.firstBuyPriceTL ?? livePrice
         let tpSlNote = Self.tpSlSummary(avgCostTL: appliedAvgCost, tp1BaseTL: tp1Base, settings: settings)
         let buyEventNote = isAddOn
-            ? "\(action.note) • Ek AL onaylandı • \(tpSlNote)"
-            : "\(action.note) • Onaylı"
+            ? "\(action.note) • Ek AL onaylandı • \(tpSlNote) • Onay \(approvalTime) • ₺\(String(format: "%.2f", livePrice))"
+            : "\(action.note) • Onaylı • Onay \(approvalTime) • ₺\(String(format: "%.2f", livePrice))"
 
         appendEvent(
             LiveStrategyEvent(
@@ -1134,9 +1340,14 @@ final class LiveStrategyStore: ObservableObject {
         portfolioVM.loadFromDiskAndRefresh()
     }
 
-    private func executeApprovedSell(_ action: LiveStrategyPendingAction, now: Date) async {
-        let livePrice = await Self.fetchLastClose(yahoo: yahoo, symbol: action.symbol) ?? action.priceTL
+    private func executeApprovedSell(
+        _ action: LiveStrategyPendingAction,
+        now: Date,
+        approvalPrice: Double
+    ) async {
+        let livePrice = max(0.0001, approvalPrice)
         guard livePrice > 0 else { return }
+        let approvalTime = now.formatted(date: .omitted, time: .shortened)
         guard let idx = holdings.firstIndex(where: { $0.symbol == action.symbol }) else { return }
 
         let current = holdings[idx]
@@ -1175,7 +1386,7 @@ final class LiveStrategyStore: ObservableObject {
                 symbol: action.symbol,
                 amountTL: proceeds,
                 cashAfterTL: cashTL,
-                note: "\(action.note) • Onaylı",
+                note: "\(action.note) • Onaylı • Onay \(approvalTime) • ₺\(String(format: "%.2f", livePrice))",
                 holdingsText: holdingsSummary(from: holdings)
             )
         )
@@ -1185,6 +1396,10 @@ final class LiveStrategyStore: ObservableObject {
         events.append(event)
         if events.count > maxStoredEvents {
             events.removeFirst(events.count - maxStoredEvents)
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.syncEventsToCloud([event])
         }
     }
 
@@ -1231,6 +1446,50 @@ final class LiveStrategyStore: ObservableObject {
                 return "\(clean) \(String(format: "%.1f", h.quantity))l • Ort ₺\(String(format: "%.2f", h.avgCostTL)) • Son ₺\(String(format: "%.2f", h.lastPriceTL)) • \(String(format: "%+.1f%%", h.pnlPct))"
             }
             .joined(separator: " | ")
+    }
+
+    private func reportBuyUniverseChanges(currentSymbols: Set<String>, now: Date) {
+        let normalizedCurrent = currentSymbols.map { $0.normalizedBISTSymbol() }
+        let currentSorted = Array(Set(normalizedCurrent)).sorted()
+        guard !currentSorted.isEmpty else {
+            lastScannedBuySymbols = []
+            return
+        }
+        if lastScannedBuySymbols.isEmpty {
+            lastScannedBuySymbols = currentSorted
+            return
+        }
+
+        let previousSet = Set(lastScannedBuySymbols)
+        let currentSet = Set(currentSorted)
+        let added = currentSet.subtracting(previousSet).sorted()
+        let removed = previousSet.subtracting(currentSet).sorted()
+
+        lastScannedBuySymbols = currentSorted
+        guard !added.isEmpty || !removed.isEmpty else { return }
+
+        let addedText = added.prefix(6).joined(separator: ", ")
+        let removedText = removed.prefix(6).joined(separator: ", ")
+        let addedTail = added.count > 6 ? " +\(added.count - 6)" : ""
+        let removedTail = removed.count > 6 ? " +\(removed.count - 6)" : ""
+        let addedLine = added.isEmpty ? "-" : "\(addedText)\(addedTail)"
+        let removedLine = removed.isEmpty ? "-" : "\(removedText)\(removedTail)"
+
+        appendEvent(
+            LiveStrategyEvent(
+                date: now,
+                kind: .skip,
+                symbol: "GENEL",
+                amountTL: 0,
+                cashAfterTL: cashTL,
+                note: """
+                Dinamik liste güncellendi
+                Eklenen: \(added.count) • \(addedLine)
+                Çıkarılan: \(removed.count) • \(removedLine)
+                """,
+                holdingsText: holdingsSummary(from: holdings)
+            )
+        )
     }
 
     private func registerObservers() {
@@ -1309,10 +1568,7 @@ final class LiveStrategyStore: ObservableObject {
                 if Task.isCancelled { break }
                 let now = Date()
                 guard !Self.isWeekend(now: now) else { continue }
-                guard Self.isMorningExecutionWindow(now: now) else { continue }
-                if let lastUpdated = self.lastUpdated, Calendar.current.isDate(lastUpdated, inSameDayAs: now) {
-                    continue
-                }
+                guard Self.isMarketSessionOpen(now: now) else { continue }
                 await self.refreshNow(trigger: .autoSchedule)
             }
         }
@@ -1389,17 +1645,61 @@ final class LiveStrategyStore: ObservableObject {
         Calendar.current.date(bySettingHour: hour, minute: 0, second: 0, of: day) ?? day
     }
 
+    private static func deterministicBucket(seed: String, modulo: Int) -> Int {
+        guard modulo > 0 else { return 0 }
+        var hash: UInt64 = 1469598103934665603
+        for b in seed.utf8 {
+            hash ^= UInt64(b)
+            hash &*= 1099511628211
+        }
+        return Int(hash % UInt64(modulo))
+    }
+
+    private static func randomizedTime(
+        on day: Date,
+        startHour: Int,
+        endHour: Int,
+        seed: String
+    ) -> Date {
+        let cal = Calendar.current
+        let start = cal.date(bySettingHour: startHour, minute: 0, second: 0, of: day) ?? day
+        let totalSeconds = max(1, (endHour - startHour) * 3600)
+        let offset = deterministicBucket(seed: seed, modulo: totalSeconds)
+        return start.addingTimeInterval(TimeInterval(offset))
+    }
+
+    private static func randomizedBuyExecutionTime(on day: Date, symbol: String) -> Date {
+        randomizedTime(
+            on: day,
+            startHour: 17,
+            endHour: 18,
+            seed: "BUY|\(symbol.normalizedBISTSymbol())|\(day.timeIntervalSince1970)"
+        )
+    }
+
+    private static func randomizedSellExecutionTime(on day: Date, symbol: String) -> Date {
+        randomizedTime(
+            on: day,
+            startHour: 10,
+            endHour: 18,
+            seed: "SELL|\(symbol.normalizedBISTSymbol())|\(day.timeIntervalSince1970)"
+        )
+    }
+
     private func runHistoricalBootstrap(until wallClockNow: Date) async {
         guard let startedAt else { return }
         let cal = Calendar.current
         let startDay = cal.startOfDay(for: startedAt)
         let today = cal.startOfDay(for: wallClockNow)
-        let replayEndDay = today
+        guard let replayEndDay = cal.date(byAdding: .day, value: -1, to: today) else {
+            errorText = "Geçmiş gün bulunamadı. Strateji canlı takipte."
+            return
+        }
         guard startDay <= replayEndDay else {
             errorText = "Geçmiş gün bulunamadı. Strateji canlı takipte."
             return
         }
-        let buyEndDay = today
+        let buyEndDay = replayEndDay
 
         errorText = "Geçmiş strateji hazırlanıyor..."
 
@@ -1419,6 +1719,8 @@ final class LiveStrategyStore: ObservableObject {
                 yahoo: yahoo,
                 indexOption: settings.indexOption,
                 preset: settings.preset,
+                strategyMode: settings.strategyMode,
+                ultraPreset: settings.ultraPreset,
                 exitConfig: exitConfig,
                 portfolioConfig: portfolioConfig,
                 includeTodaySignals: true
@@ -1441,6 +1743,7 @@ final class LiveStrategyStore: ObservableObject {
             events = simulated.events
             pendingActions = []
             lastUpdated = wallClockNow
+            lastBuyWindowRunAt = nil
             sourceSnapshotDate = nil
             skipBuyUntil = nil
             await refreshHoldingsWithLatestQuotes(now: wallClockNow)
@@ -1509,12 +1812,11 @@ final class LiveStrategyStore: ObservableObject {
 
         var day = startDay
         while day <= replayEndDay {
-            let current = executionDate(for: day)
-            let buyExecution = executionDate(for: day, hour: 17)
+            let dayBuyClock = executionDate(for: day, hour: 17)
             if Self.isWeekend(now: day) {
                 appendEvent(
                     LiveStrategyEvent(
-                        date: buyExecution,
+                        date: dayBuyClock,
                         kind: .skip,
                         symbol: "GENEL",
                         amountTL: 0,
@@ -1595,7 +1897,7 @@ final class LiveStrategyStore: ObservableObject {
                 }
                 appendEvent(
                     LiveStrategyEvent(
-                        date: current,
+                        date: Self.randomizedSellExecutionTime(on: day, symbol: p.symbol),
                         kind: .sell,
                         symbol: p.symbol,
                         amountTL: tp1Proceeds,
@@ -1645,7 +1947,7 @@ final class LiveStrategyStore: ObservableObject {
                 }()
                 appendEvent(
                     LiveStrategyEvent(
-                        date: current,
+                        date: Self.randomizedSellExecutionTime(on: day, symbol: p.symbol),
                         kind: .sell,
                         symbol: p.symbol,
                         amountTL: proceeds,
@@ -1672,14 +1974,16 @@ final class LiveStrategyStore: ObservableObject {
                     let openSlots = max(0, settings.maxOpenPositions - uniqueOpenCount)
                     let addOnEligible = eligible.filter { openSymbols.contains($0.symbol.normalizedBISTSymbol()) }
                     let newEligible = eligible.filter { !openSymbols.contains($0.symbol.normalizedBISTSymbol()) }
+                    let minSpend = max(1.0, settings.minPerPositionTL)
+                    let affordableCount = max(0, Int(floor(cash / minSpend)))
                     let selectedAddOns = addOnEligible
                     let selectedNew = Array(newEligible.prefix(openSlots))
-                    let selected = selectedAddOns + selectedNew
+                    let selected = Array((selectedAddOns + selectedNew).prefix(affordableCount))
 
                     if selected.isEmpty, !eligible.isEmpty, openSlots <= 0 {
                         appendEvent(
                             LiveStrategyEvent(
-                                date: buyExecution,
+                                date: dayBuyClock,
                                 kind: .skip,
                                 symbol: "GENEL",
                                 amountTL: 0,
@@ -1696,7 +2000,7 @@ final class LiveStrategyStore: ObservableObject {
                     } else if eligible.isEmpty {
                         appendEvent(
                             LiveStrategyEvent(
-                                date: buyExecution,
+                                date: dayBuyClock,
                                 kind: .skip,
                                 symbol: "GENEL",
                                 amountTL: 0,
@@ -1706,6 +2010,7 @@ final class LiveStrategyStore: ObservableObject {
                                 Aday: 0
                                 Preset: \(settings.preset.title)
                                 Min skor: \(settings.preset.minBuyTotal)
+                                Min/Max: \(String(format: "₺%.0f/₺%.0f", settings.minPerPositionTL, settings.maxPerPositionTL))
                                 Nakit: \(String(format: "₺%.0f", cash))
                                 """,
                                 holdingsText: openHoldingsText(open)
@@ -1714,7 +2019,7 @@ final class LiveStrategyStore: ObservableObject {
                     } else if eligible.count > selected.count {
                         appendEvent(
                             LiveStrategyEvent(
-                                date: buyExecution,
+                                date: dayBuyClock,
                                 kind: .skip,
                                 symbol: "GENEL",
                                 amountTL: 0,
@@ -1730,12 +2035,16 @@ final class LiveStrategyStore: ObservableObject {
                     }
 
                     if !selected.isEmpty {
-                        let equalBudget = min(settings.maxPerPositionTL, cash / Double(selected.count))
+                        var hadMinCashShortfall = false
+                        var executedBuys = 0
                         for t in selected {
+                            if cash < settings.minPerPositionTL {
+                                break
+                            }
                             if cash <= 0 {
                                 appendEvent(
                                     LiveStrategyEvent(
-                                        date: buyExecution,
+                                        date: dayBuyClock,
                                         kind: .skip,
                                         symbol: t.symbol.normalizedBISTSymbol(),
                                         amountTL: 0,
@@ -1748,16 +2057,23 @@ final class LiveStrategyStore: ObservableObject {
                             }
 
                             let price = max(0.0001, t.entryPrice)
-                            let budget = min(equalBudget, cash)
-                            if budget <= 0 {
+                            let budgetCap = min(settings.maxPerPositionTL, cash)
+                            if budgetCap <= 0 {
                                 continue
                             }
-
-                            let qty = floor(budget / price)
-                            if qty < 1 { continue }
-                            let spent = qty * price
+                            guard let order = Self.resolveBuyOrder(
+                                price: price,
+                                budgetCap: budgetCap,
+                                minSpendTL: settings.minPerPositionTL
+                            ) else {
+                                hadMinCashShortfall = true
+                                continue
+                            }
+                            let qty = order.quantity
+                            let spent = order.spentTL
 
                             let symbol = t.symbol.normalizedBISTSymbol()
+                            let buyExecution = Self.randomizedBuyExecutionTime(on: day, symbol: symbol)
                             let plannedTotalProceeds = max(0, spent * (1.0 + t.returnPct / 100.0))
                             let scaledTp1Proceeds: Double = {
                                 guard let raw = t.tp1Proceeds, t.entryPrice > 0 else { return 0 }
@@ -1781,7 +2097,7 @@ final class LiveStrategyStore: ObservableObject {
                                 plannedTotalProceeds: plannedTotalProceeds,
                                 tp1PlannedProceeds: tp1PlannedProceeds,
                                 tp1Day: tp1Day,
-                                tp1Applied: tp1PlannedProceeds <= 0.000_000_1
+                                tp1Applied: false
                             )
 
                             appendEvent(
@@ -1795,13 +2111,28 @@ final class LiveStrategyStore: ObservableObject {
                                     holdingsText: openHoldingsText(open)
                                 )
                             )
+                            executedBuys += 1
+                        }
+
+                        if hadMinCashShortfall, executedBuys == 0 {
+                            appendEvent(
+                                LiveStrategyEvent(
+                                    date: dayBuyClock,
+                                    kind: .skip,
+                                    symbol: "GENEL",
+                                    amountTL: 0,
+                                    cashAfterTL: cash,
+                                    note: "Min alım (\(String(format: "₺%.0f", settings.minPerPositionTL))) için nakit yetersiz",
+                                    holdingsText: openHoldingsText(open)
+                                )
+                            )
                         }
                     }
                 }
                 else if cash > 0 {
                     appendEvent(
                         LiveStrategyEvent(
-                            date: buyExecution,
+                            date: dayBuyClock,
                             kind: .skip,
                             symbol: "GENEL",
                             amountTL: 0,
@@ -1942,6 +2273,22 @@ final class LiveStrategyStore: ObservableObject {
         return String(format: "TP1 ₺%.2f • TP2 ₺%.2f • SL ₺%.2f", tp1, tp2, sl)
     }
 
+    private static func resolveBuyOrder(
+        price: Double,
+        budgetCap: Double,
+        minSpendTL: Double
+    ) -> (quantity: Double, spentTL: Double)? {
+        guard price > 0 else { return nil }
+        guard budgetCap >= minSpendTL else { return nil }
+        let maxLots = Int(floor(budgetCap / price))
+        let minLots = max(1, Int(ceil(minSpendTL / price)))
+        guard maxLots >= minLots else { return nil }
+        let quantity = Double(maxLots)
+        let spent = quantity * price
+        guard spent >= minSpendTL else { return nil }
+        return (quantity: quantity, spentTL: spent)
+    }
+
     private static func replayExitReasonText(_ reason: ExitReason) -> String {
         switch reason {
         case .takeProfit:
@@ -2070,6 +2417,24 @@ final class LiveStrategyStore: ObservableObject {
         }
     }
 
+    private static func fetchApprovalPrice(
+        yahoo: YahooFinanceService,
+        symbol: String,
+        fallback: Double
+    ) async -> Double {
+        do {
+            if let intraday = try await yahoo.fetchLatestIntradayPrice(symbol: symbol, range: "1d", interval: "5m"),
+               intraday > 0 {
+                return intraday
+            }
+        } catch {}
+
+        if let daily = await fetchLastClose(yahoo: yahoo, symbol: symbol), daily > 0 {
+            return daily
+        }
+        return max(0.0001, fallback)
+    }
+
     private func appendBuysToPortfolio(_ buys: [(symbol: String, quantity: Double, price: Double)]) async {
         guard !buys.isEmpty else { return }
 
@@ -2128,6 +2493,7 @@ final class LiveStrategyStore: ObservableObject {
 
         await PortfolioStore.shared.save(assets)
         mergePortfolioContributions(addedContributions)
+        await syncPortfolioToCloud()
     }
 
     private func mergePortfolioContributions(_ added: [StrategyPortfolioContributionRecord]) {
@@ -2155,6 +2521,7 @@ final class LiveStrategyStore: ObservableObject {
         }
         portfolioVM.loadFromDiskAndRefresh()
         persist()
+        await syncPortfolioToCloud()
     }
 
     private static func removeContribution(
@@ -2261,6 +2628,8 @@ final class LiveStrategyStore: ObservableObject {
         events = snap.events
         pendingActions = snap.pendingActions
         skipBuyUntil = snap.skipBuyUntil
+        lastBuyWindowRunAt = snap.lastBuyWindowRunAt
+        lastScannedBuySymbols = snap.lastScannedBuySymbols
         var map: [UUID: StrategyPortfolioContributionRecord] = [:]
         for record in snap.portfolioContributions {
             if var current = map[record.assetID] {
@@ -2300,10 +2669,124 @@ final class LiveStrategyStore: ObservableObject {
             events: events,
             pendingActions: pendingActions,
             skipBuyUntil: skipBuyUntil,
+            lastBuyWindowRunAt: lastBuyWindowRunAt,
+            lastScannedBuySymbols: lastScannedBuySymbols,
             portfolioContributions: Array(portfolioContributionsByAssetID.values)
         )
         if let data = try? JSONEncoder().encode(snap) {
             UserDefaults.standard.set(data, forKey: snapshotKey)
+        }
+        publishWidgetSnapshot()
+        guard !isHydrating else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.syncSnapshotToCloud()
+        }
+    }
+
+    private func publishWidgetSnapshot() {
+        let equity = cashTL + holdings.reduce(0) { $0 + max(0, $1.marketValueTL) }
+        let snapshot = StrategyWidgetSnapshot(
+            isRunning: isRunning,
+            pendingCount: pendingActions.count,
+            holdingsCount: holdings.count,
+            equityTL: equity,
+            cashTL: cashTL,
+            updatedAt: lastUpdated ?? Date()
+        )
+        WidgetSnapshotBridge.shared.writeStrategySnapshot(snapshot)
+    }
+
+    private func looksLikeLocalSnapshotPresent() -> Bool {
+        isRunning ||
+        startedAt != nil ||
+        lastUpdated != nil ||
+        !holdings.isEmpty ||
+        !events.isEmpty ||
+        !pendingActions.isEmpty
+    }
+
+    @discardableResult
+    private func hydrateFromCloudIfNeeded(force: Bool = false) async -> Bool {
+        guard force || !didAttemptCloudHydrate else { return false }
+        didAttemptCloudHydrate = true
+        guard force || !looksLikeLocalSnapshotPresent() else { return false }
+        guard let userID = cloudUserID else { return false }
+
+        do {
+            guard let remote = try await cloudRepository.fetchStrategySnapshot(userID: userID) else { return false }
+            let recentEvents = try await cloudRepository.fetchRecentStrategyEvents(userID: userID, limit: maxStoredEvents)
+            let remotePortfolio = try await cloudRepository.fetchPortfolioPositions(userID: userID)
+            isHydrating = true
+            defer { isHydrating = false }
+
+            isRunning = remote.isRunning
+            startedAt = remote.startedAt
+            lastUpdated = remote.lastUpdated
+            sourceSnapshotDate = remote.sourceSnapshotDate
+            initialCapitalTL = remote.initialCapitalTL
+            cashTL = remote.cashTL
+            settings = remote.settings
+            holdings = remote.holdings
+            pendingActions = remote.pendingActions
+            skipBuyUntil = remote.skipBuyUntil
+            lastBuyWindowRunAt = remote.lastBuyWindowRunAt
+            events = recentEvents.sorted { $0.date < $1.date }
+            clampAfterRestore()
+            persist()
+            await PortfolioStore.shared.save(remotePortfolio)
+            return true
+        } catch {
+            errorText = "Cloud verisi okunamadı: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func currentCloudSnapshot() -> StrategyCloudSnapshot {
+        StrategyCloudSnapshot(
+            isRunning: isRunning,
+            startedAt: startedAt,
+            lastUpdated: lastUpdated,
+            sourceSnapshotDate: sourceSnapshotDate,
+            initialCapitalTL: initialCapitalTL,
+            cashTL: cashTL,
+            settings: settings,
+            holdings: holdings,
+            pendingActions: pendingActions,
+            skipBuyUntil: skipBuyUntil,
+            lastBuyWindowRunAt: lastBuyWindowRunAt
+        )
+    }
+
+    private func syncSnapshotToCloud() async {
+        guard let userID = cloudUserID else { return }
+        do {
+            try await cloudRepository.upsertStrategySnapshot(
+                userID: userID,
+                snapshot: currentCloudSnapshot()
+            )
+        } catch {
+            errorText = "Cloud snapshot yazılamadı: \(error.localizedDescription)"
+        }
+    }
+
+    private func syncEventsToCloud(_ newEvents: [LiveStrategyEvent]) async {
+        guard let userID = cloudUserID else { return }
+        guard !newEvents.isEmpty else { return }
+        do {
+            try await cloudRepository.appendStrategyEvents(userID: userID, events: newEvents)
+        } catch {
+            errorText = "Cloud event yazılamadı: \(error.localizedDescription)"
+        }
+    }
+
+    private func syncPortfolioToCloud() async {
+        guard let userID = cloudUserID else { return }
+        do {
+            let assets = await PortfolioStore.shared.load()
+            try await cloudRepository.replacePortfolioPositions(userID: userID, assets: assets)
+        } catch {
+            errorText = "Cloud portföy yazılamadı: \(error.localizedDescription)"
         }
     }
 }

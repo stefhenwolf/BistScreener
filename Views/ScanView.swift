@@ -138,6 +138,14 @@ struct ScanView: View {
         TVCard {
             VStack(spacing: DS.s12) {
 
+                // Strateji modu seçimi
+                Picker("Strateji", selection: $vm.strategyMode) {
+                    ForEach(ScanStrategyMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 Picker("Endeks", selection: $vm.selectedIndex) {
                     ForEach(IndexOption.allCases) { opt in
                         Text(opt.title).tag(opt)
@@ -147,9 +155,15 @@ struct ScanView: View {
 
                 HStack(spacing: 10) {
                     TVChip("Preset", systemImage: "slider.horizontal.3")
-                    Text(vm.preset.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(TVTheme.text)
+                    if vm.strategyMode == .ultraBounce {
+                        Text(vm.ultraPreset.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(TVTheme.text)
+                    } else {
+                        Text(vm.preset.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(TVTheme.text)
+                    }
 
                     Spacer()
 
