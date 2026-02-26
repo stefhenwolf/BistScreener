@@ -119,6 +119,9 @@ struct CandlestickChartView: View {
                                         .onLongPressGesture(minimumDuration: 0.12) { updateSelection(c) }
                                         .id("candle-\(i)")
                                 }
+                                Color.clear
+                                    .frame(width: 1, height: 1)
+                                    .id("chart-end")
                             }
 
                             LazyHStack(spacing: barSpacing) {
@@ -205,12 +208,11 @@ struct CandlestickChartView: View {
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        guard let lastIdx = candles.indices.last else { return }
         DispatchQueue.main.async {
-            proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+            proxy.scrollTo("chart-end", anchor: .trailing)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+            proxy.scrollTo("chart-end", anchor: .trailing)
         }
     }
 
