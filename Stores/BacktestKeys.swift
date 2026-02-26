@@ -19,6 +19,8 @@ enum BacktestKeys {
     static let maxPerPositionTL = "backtest.portfolio.maxPerPositionTL"
     static let addOnMode        = "backtest.portfolio.addOnMode"
     static let addOnWaitDays    = "backtest.portfolio.addOnWaitDays"
+    static let sizingCapitalTL  = "backtest.sizing.capitalTL"
+    static let sizingRiskPct    = "backtest.sizing.riskPct"
 
     // Signal mode
     static let scanPreset       = "settings.scanPreset"

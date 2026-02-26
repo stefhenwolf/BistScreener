@@ -46,6 +46,8 @@ struct StockDetailView: View {
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
     @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
     @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
+    @AppStorage(BacktestKeys.sizingCapitalTL) private var sizingCapitalTL: Double = 100_000
+    @AppStorage(BacktestKeys.sizingRiskPct) private var sizingRiskPct: Double = 1.0
     @AppStorage(BacktestKeys.scanPreset) private var selectedPresetRaw: String = TomorrowPreset.normal.rawValue
     @AppStorage(BacktestKeys.strategyMode) private var selectedStrategyModeRaw: String = ScanStrategyMode.preBreakout.rawValue
     @AppStorage(BacktestKeys.ultraPreset) private var selectedUltraPresetRaw: String = UltraPreset.hunter.rawValue
@@ -376,6 +378,11 @@ struct StockDetailView: View {
                     let netRewardPct = entryNet > 0 ? ((tpNet - entryNet) / entryNet) * 100.0 : 0
                     let netRiskPct = entryNet > 0 ? ((entryNet - slNet) / entryNet) * 100.0 : 0
                     let rr = netRiskPct > 0 ? netRewardPct / netRiskPct : 0
+                    let riskPerShareTL = max(0.0001, entryNet - slNet)
+                    let riskBudgetTL = sizingCapitalTL * (sizingRiskPct / 100.0)
+                    let suggestedLots = Int(max(0, floor(riskBudgetTL / riskPerShareTL)))
+                    let suggestedPosTL = Double(suggestedLots) * entryNet
+
                     HStack(spacing: 6) {
                         Text("Net Risk/Reward:")
                             .font(.system(size: 11, weight: .medium))
@@ -383,6 +390,13 @@ struct StockDetailView: View {
                         Text(String(format: "1:%.1f", rr))
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(rr >= 2.5 ? TVTheme.up : (rr >= 1.5 ? .orange : TVTheme.down))
+                    }
+
+                    HStack(spacing: 8) {
+                        exitMiniChip(String(format: "Risk: %.1f%%", sizingRiskPct), TVTheme.subtext)
+                        exitMiniChip(String(format: "Sermaye: ₺%.0f", sizingCapitalTL), TVTheme.subtext)
+                        exitMiniChip("Öneri Lot: \(suggestedLots)", TVTheme.text)
+                        exitMiniChip(String(format: "Pozisyon: ₺%.0f", suggestedPosTL), TVTheme.text)
                     }
                 }
 

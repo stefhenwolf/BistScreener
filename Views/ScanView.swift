@@ -182,6 +182,8 @@ struct ScanView: View {
 
                     Spacer()
 
+                    TVChip("RS-proxy: aktif", systemImage: "chart.line.uptrend.xyaxis")
+
                     TVChip("Sırala", systemImage: "arrow.up.arrow.down")
                     Menu {
                         Picker("Sırala", selection: $sort) {
@@ -346,10 +348,35 @@ struct ScanView: View {
 
     private func sortedResults(_ arrIn: [ScanResult]) -> [ScanResult] {
         var arr = arrIn
+
+        let changes = arr.map(\.changePct).sorted()
+        let medianChange: Double = {
+            guard !changes.isEmpty else { return 0 }
+            let m = changes.count / 2
+            if changes.count % 2 == 0 { return (changes[m - 1] + changes[m]) / 2 }
+            return changes[m]
+        }()
+
+        func rsAdjustedScore(_ r: ScanResult) -> Int {
+            // Endeks-relative proxy: aynı evrendeki medyan değişime göre bonus/ceza
+            let rel = r.changePct - medianChange
+            let bonus: Int
+            switch rel {
+            case 1.5...: bonus = 4
+            case 0.5..<1.5: bonus = 2
+            case ..<(-1.5): bonus = -3
+            case -1.5..<(-0.5): bonus = -1
+            default: bonus = 0
+            }
+            return r.uiScore + bonus
+        }
+
         switch sort {
         case .scoreDesc:
             arr.sort {
-                if $0.uiScore != $1.uiScore { return $0.uiScore > $1.uiScore }
+                let s0 = rsAdjustedScore($0)
+                let s1 = rsAdjustedScore($1)
+                if s0 != s1 { return s0 > s1 }
                 return $0.changePct > $1.changePct
             }
         case .changeDesc:

@@ -22,6 +22,8 @@ struct BacktestView: View {
     @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
     @AppStorage(BacktestKeys.minPerPositionTL) private var minPerPositionTL: Double = 400
     @AppStorage(BacktestKeys.maxPerPositionTL) private var maxPerPositionTL: Double = 5_000
+    @AppStorage(BacktestKeys.sizingCapitalTL) private var sizingCapitalTL: Double = 100_000
+    @AppStorage(BacktestKeys.sizingRiskPct) private var sizingRiskPct: Double = 1.0
     @AppStorage(BacktestKeys.addOnMode) private var addOnMode: Int = 0
     @AppStorage(BacktestKeys.addOnWaitDays) private var addOnWaitDays: Double = 5
 
@@ -118,6 +120,8 @@ struct BacktestView: View {
             slippageBps = min(max(slippageBps, 0), 100)
             minPerPositionTL = min(max(minPerPositionTL, 100), hardMaxPerPositionTL)
             maxPerPositionTL = min(max(maxPerPositionTL, 100), hardMaxPerPositionTL)
+            sizingCapitalTL = min(max(sizingCapitalTL, 20_000), 1_000_000)
+            sizingRiskPct = min(max(sizingRiskPct, 0.25), 3.0)
             if minPerPositionTL > maxPerPositionTL {
                 minPerPositionTL = maxPerPositionTL
             }
@@ -135,6 +139,12 @@ struct BacktestView: View {
         .onChange(of: maxPerPositionTL) { _ in
             if maxPerPositionTL < minPerPositionTL { maxPerPositionTL = minPerPositionTL }
             recomputePortfolioSimulation()
+        }
+        .onChange(of: sizingCapitalTL) { _ in
+            sizingCapitalTL = min(max(sizingCapitalTL, 20_000), 1_000_000)
+        }
+        .onChange(of: sizingRiskPct) { _ in
+            sizingRiskPct = min(max(sizingRiskPct, 0.25), 3.0)
         }
         .onDisappear {
             portfolioSimulationTask?.cancel()
@@ -342,6 +352,22 @@ struct BacktestView: View {
                     format: "₺%.0f"
                 )
 
+                sliderRow(
+                    title: "🏦 Pozisyonlama Sermayesi",
+                    value: $sizingCapitalTL,
+                    range: 20_000...1_000_000,
+                    step: 5_000,
+                    format: "₺%.0f"
+                )
+
+                sliderRow(
+                    title: "🎯 İşlem Başına Risk",
+                    value: $sizingRiskPct,
+                    range: 0.25...3.0,
+                    step: 0.25,
+                    format: "%.2f%%"
+                )
+
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("➕ Açık Pozisyonda Ek Alım")
@@ -404,6 +430,8 @@ struct BacktestView: View {
                     miniChip("\(Int(maxHoldDays))g", TVTheme.subtext)
                     miniChip("Kom \(Int(commissionBps))bps", TVTheme.subtext)
                     miniChip("Slip \(Int(slippageBps))bps", TVTheme.subtext)
+                    miniChip("Risk \(String(format: "%.2f", sizingRiskPct))%", TVTheme.subtext)
+                    miniChip("Sermaye ₺\(Int(sizingCapitalTL))", TVTheme.subtext)
                     miniChip("Min ₺\(Int(minPerPositionTL))", TVTheme.subtext)
                     miniChip("Max ₺\(Int(maxPerPositionTL))", TVTheme.subtext)
                     miniChip(addOnModeLabel, TVTheme.subtext)
