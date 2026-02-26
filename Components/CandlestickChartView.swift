@@ -161,7 +161,20 @@ struct CandlestickChartView: View {
                                 verticalPan = value.translation.height
                             }
                         }
-                        .onEnded { _ in
+                        .onEnded { value in
+                            if abs(value.translation.width) >= abs(value.translation.height) {
+                                let unit = max(zoomedWidth + barSpacing, 1)
+                                let projectedBars = Int((value.predictedEndTranslation.width / unit).rounded())
+                                let start = dragStartHorizontalOffset ?? horizontalBarOffset
+                                withAnimation(.interpolatingSpring(stiffness: 180, damping: 24)) {
+                                    horizontalBarOffset = clampedHorizontalOffset(start + projectedBars, width: geo.size.width)
+                                }
+                            } else {
+                                let projected = value.predictedEndTranslation.height
+                                withAnimation(.interpolatingSpring(stiffness: 180, damping: 24)) {
+                                    verticalPan = min(max(projected, -chartHeight * 0.35), chartHeight * 0.35)
+                                }
+                            }
                             dragStartHorizontalOffset = nil
                         }
                 )
