@@ -11,6 +11,8 @@ private struct TradeJournalEntry: Codable, Identifiable, Hashable {
     let signalScore: Int
     let signalQuality: String
     let action: String
+    let tags: [String]
+    let resultR: Double?
 
     init(
         id: UUID = UUID(),
@@ -19,7 +21,9 @@ private struct TradeJournalEntry: Codable, Identifiable, Hashable {
         note: String,
         signalScore: Int,
         signalQuality: String,
-        action: String = "Not"
+        action: String = "Not",
+        tags: [String] = [],
+        resultR: Double? = nil
     ) {
         self.id = id
         self.symbol = symbol
@@ -28,6 +32,8 @@ private struct TradeJournalEntry: Codable, Identifiable, Hashable {
         self.signalScore = signalScore
         self.signalQuality = signalQuality
         self.action = action
+        self.tags = tags
+        self.resultR = resultR
     }
 }
 
@@ -87,6 +93,9 @@ struct StockDetailView: View {
     @State private var tomorrow: TomorrowSignalScore? = nil
     @State private var tomorrowRejectNotes: [String] = []
     @State private var journalNote: String = ""
+    @State private var journalResultRText: String = ""
+    @State private var selectedJournalTag: String = "Genel"
+    @State private var journalFilter: JournalFilter = .all
     @State private var journalEntries: [TradeJournalEntry] = []
 
     /// Route üzerinden gelen özet veri (header/fallback hesaplamaları için).
@@ -704,6 +713,26 @@ struct StockDetailView: View {
         )
     }
 
+    private enum JournalFilter: String, CaseIterable, Identifiable {
+        case all = "Tümü"
+        case positive = "+R"
+        case negative = "-R"
+        var id: String { rawValue }
+    }
+
+    private let journalTags = ["Genel", "FOMO", "Erken Çıkış", "Disiplin", "Plan Dışı", "Mükemmel"]
+
+    private var filteredJournalEntries: [TradeJournalEntry] {
+        switch journalFilter {
+        case .all:
+            return journalEntries
+        case .positive:
+            return journalEntries.filter { ($0.resultR ?? 0) > 0 }
+        case .negative:
+            return journalEntries.filter { ($0.resultR ?? 0) < 0 }
+        }
+    }
+
     private var tradeJournalCard: some View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -717,9 +746,29 @@ struct StockDetailView: View {
                         .foregroundStyle(TVTheme.subtext)
                 }
 
-                TextField("Not (neden girdim/çıkacağım, ders, hata)", text: $journalNote, axis: .vertical)
+                TextField("Not (neden girdim/çıktım, ders, hata)", text: $journalNote, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(2...4)
+
+                HStack(spacing: 8) {
+                    Picker("Tag", selection: $selectedJournalTag) {
+                        ForEach(journalTags, id: \.self) { t in
+                            Text(t).tag(t)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Sonuç (R)", text: $journalResultRText)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.decimalPad)
+                }
+
+                Picker("Filtre", selection: $journalFilter) {
+                    ForEach(JournalFilter.allCases) { f in
+                        Text(f.rawValue).tag(f)
+                    }
+                }
+                .pickerStyle(.segmented)
 
                 HStack {
                     Spacer()
@@ -734,16 +783,29 @@ struct StockDetailView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !journalEntries.isEmpty {
-                    ForEach(Array(journalEntries.prefix(3))) { e in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(e.date, format: .dateTime.day().month().hour().minute())
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(TVTheme.subtext)
+                if !filteredJournalEntries.isEmpty {
+                    ForEach(Array(filteredJournalEntries.prefix(5))) { e in
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(e.date, format: .dateTime.day().month().hour().minute())
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(TVTheme.subtext)
+                                Spacer()
+                                if let r = e.resultR {
+                                    Text(String(format: "%+.2fR", r))
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(r >= 0 ? TVTheme.up : TVTheme.down)
+                                }
+                            }
                             Text(e.note)
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(TVTheme.text)
                                 .lineLimit(2)
+                            if !e.tags.isEmpty {
+                                Text(e.tags.joined(separator: " • "))
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(TVTheme.subtext)
+                            }
                         }
                         .padding(.vertical, 2)
                     }
@@ -759,15 +821,24 @@ struct StockDetailView: View {
     private func addJournalEntry() {
         let trimmed = journalNote.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        let normalizedR = journalResultRText.replacingOccurrences(of: ",", with: ".")
+        let parsedR = Double(normalizedR)
+        let tag = selectedJournalTag == "Genel" ? [] : [selectedJournalTag]
+
         let entry = TradeJournalEntry(
             symbol: symbol,
             note: trimmed,
             signalScore: tomorrow?.total ?? 0,
             signalQuality: tomorrow?.quality ?? "-",
-            action: "Not"
+            action: "Not",
+            tags: tag,
+            resultR: parsedR
         )
         TradeJournalStore.add(entry)
         journalNote = ""
+        journalResultRText = ""
+        selectedJournalTag = "Genel"
         reloadJournal()
     }
 
