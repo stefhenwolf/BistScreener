@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-and-test:
+  build:
     runs-on: macos-15
 
     steps:
@@ -22,11 +22,11 @@ jobs:
       - name: Resolve Swift Packages
         run: xcodebuild -resolvePackageDependencies -project BistScreener.xcodeproj -scheme BistScreener
 
-      - name: Build (iOS Simulator)
+      - name: Build (generic iOS Simulator)
         run: xcodebuild \
           -project BistScreener.xcodeproj \
           -scheme BistScreener \
           -configuration Debug \
-          -destination 'platform=iOS Simulator,name=iPhone 16' \
+          -destination 'generic/platform=iOS Simulator' \
           build
 
