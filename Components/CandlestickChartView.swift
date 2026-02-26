@@ -208,11 +208,11 @@ struct CandlestickChartView: View {
     }
 
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async {
-            proxy.scrollTo("chart-end", anchor: .trailing)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            proxy.scrollTo("chart-end", anchor: .trailing)
+        let delays: [Double] = [0.0, 0.05, 0.12, 0.22]
+        for d in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + d) {
+                proxy.scrollTo("chart-end", anchor: .trailing)
+            }
         }
     }
 

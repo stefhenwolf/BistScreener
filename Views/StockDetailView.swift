@@ -64,7 +64,9 @@ struct StockDetailView: View {
     // MARK: - Derived
 
     private var shownCandles: [Candle] { Array(candles.suffix(140)) }
-    private var activeCandle: Candle? { selectedCandle ?? shownCandles.last }
+    /// Detay chart ilk açılışta güncele yakın başlasın diye daha dar görünüm penceresi
+    private var chartCandles: [Candle] { Array(shownCandles.suffix(80)) }
+    private var activeCandle: Candle? { selectedCandle ?? chartCandles.last ?? shownCandles.last }
 
     private var selectedPreset: TomorrowPreset {
         TomorrowPreset(rawValue: selectedPresetRaw) ?? .normal
@@ -454,7 +456,7 @@ struct StockDetailView: View {
             TVGrid()
 
             CandlestickChartView(
-                candles: shownCandles,
+                candles: chartCandles,
                 selected: $selectedCandle,
                 fitToWidth: false
             )
