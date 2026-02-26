@@ -228,6 +228,7 @@ struct BacktestTradeResult: Identifiable, Codable {
     let proximity: Double
     let volumeTrend: Double
     let rangeCompression: Double
+    let regime: String
 
     /// Peakten çıkış fiyatına kadar olan drawdown (%)
     let maxDrawdownPct: Double
@@ -257,6 +258,7 @@ struct BacktestTradeResult: Identifiable, Codable {
         proximity: Double,
         volumeTrend: Double,
         rangeCompression: Double,
+        regime: String = "Sideways",
         maxDrawdownPct: Double,
         peakReturnPct: Double,
         tp1Date: Date? = nil,
@@ -278,6 +280,7 @@ struct BacktestTradeResult: Identifiable, Codable {
         self.proximity = proximity
         self.volumeTrend = volumeTrend
         self.rangeCompression = rangeCompression
+        self.regime = regime
         self.maxDrawdownPct = maxDrawdownPct
         self.peakReturnPct = peakReturnPct
         self.tp1Date = tp1Date
@@ -710,6 +713,10 @@ final class BacktestEngine: ObservableObject {
                 let signalDay = candles[dayIdx]
                 let entryDate = Self.strategyExecutionDate(for: signalDay.date, hour: 17)
                 let exitDate = Self.strategyExecutionDate(for: candles[sim.finalExitIdx].date, hour: 18)
+                let regimeAtEntry = MarketRegimeDetector.detect(
+                    from: Array(candles.prefix(dayIdx + 1).suffix(220)),
+                    config: baseConfig
+                ).title
 
                 let trade = BacktestTradeResult(
                     symbol: sym,
@@ -725,6 +732,7 @@ final class BacktestEngine: ObservableObject {
                     proximity: signal.breakdown.proximityPct,
                     volumeTrend: signal.breakdown.volumeTrend,
                     rangeCompression: signal.breakdown.rangeCompression,
+                    regime: regimeAtEntry,
                     maxDrawdownPct: sim.maxDrawdownPct,
                     peakReturnPct: sim.peakReturnPct,
                     tp1Date: sim.tp1ExecutedIdx.map { Self.strategyExecutionDate(for: candles[$0].date, hour: 17) },

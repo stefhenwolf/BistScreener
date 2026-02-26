@@ -575,8 +575,71 @@ struct BacktestView: View {
                     statCell("Expectancy", String(format: "%+.2f%%", s.expectancyPct),
                              color: s.expectancyPct >= 0 ? TVTheme.up : TVTheme.down)
                 }
+
+                regimePerformanceCard(trades: s.trades)
             }
         }
+    }
+
+    private struct RegimeStat: Identifiable {
+        let regime: String
+        let count: Int
+        let winRate: Double
+        let expectancy: Double
+        let avgDrawdown: Double
+        var id: String { regime }
+    }
+
+    private func regimePerformanceCard(trades: [BacktestTradeResult]) -> some View {
+        let groups = Dictionary(grouping: trades, by: { $0.regime })
+        let stats: [RegimeStat] = ["Bull", "Sideways", "Bear"].compactMap { r in
+            guard let arr = groups[r], !arr.isEmpty else { return nil }
+            let wins = arr.filter(\.isWin).count
+            let wr = Double(wins) / Double(arr.count)
+            let avg = arr.map(\.returnPct).reduce(0, +) / Double(arr.count)
+            let dd = arr.map(\.maxDrawdownPct).reduce(0, +) / Double(arr.count)
+            return RegimeStat(regime: r, count: arr.count, winRate: wr, expectancy: avg, avgDrawdown: dd)
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Rejim Bazlı Performans")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(TVTheme.text)
+
+            if stats.isEmpty {
+                Text("Rejim verisi yok")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(TVTheme.subtext)
+            } else {
+                ForEach(stats) { st in
+                    HStack(spacing: 8) {
+                        Text(st.regime)
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 70, alignment: .leading)
+                            .foregroundStyle(TVTheme.text)
+
+                        Text("n=\(st.count)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(TVTheme.subtext)
+
+                        Spacer()
+
+                        Text(String(format: "WR %.0f%%", st.winRate * 100))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(st.winRate >= 0.55 ? TVTheme.up : TVTheme.down)
+
+                        Text(String(format: "Exp %+.2f%%", st.expectancy))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(st.expectancy >= 0 ? TVTheme.up : TVTheme.down)
+
+                        Text(String(format: "DD %.1f%%", st.avgDrawdown))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(TVTheme.down)
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
     }
 
     // MARK: - Exit Breakdown
