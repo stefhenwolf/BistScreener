@@ -608,7 +608,12 @@ enum SignalScorer {
             )
         )
 
-        guard total >= effectiveMinScore else { return nil }
+        // SoftMode'da dahi kalite tabanı uygula (noise azaltma)
+        let minScoreGate = softMode
+            ? max(effectiveMinScore, config.softModeMinQualityScore)
+            : effectiveMinScore
+
+        guard total >= minScoreGate else { return nil }
 
         let quality = qualityBand(total: total, config: config)
 
@@ -657,7 +662,7 @@ enum SignalScorer {
             String(format: "Hacim x%.1f", volumeTrend),
             String(format: "Sıkışma %.2f", rangeCompression),
             String(format: "Bugün %+.1f%%", todayChangePct),
-            "Dinamik Eşik \(effectiveMinScore)"
+            "Dinamik Eşik \(minScoreGate)"
         ]
 
         return TomorrowSignalScore(

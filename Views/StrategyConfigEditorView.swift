@@ -186,8 +186,9 @@ struct StrategyConfigEditorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 sectionTitle("Eşik")
                 StepperRowInt(title: "Min Score", value: $cfg.minScore, range: 0...100, step: 1)
+                StepperRowInt(title: "SoftMode Min Quality", value: $cfg.softModeMinQualityScore, range: 0...100, step: 1)
                 StepperRowInt(title: "Lookback Days", value: $cfg.lookbackDays, range: 10...60, step: 1)
-                hint("Lookback Days yalnızca Normal preset'te aktif. Relaxed/Strict preset değerini kullanır.")
+                hint("SoftMode Min Quality, softMode açık olsa bile minimum kalite kapısı uygular. Lookback yalnızca Normal preset'te aktif.")
             }
         }
     }

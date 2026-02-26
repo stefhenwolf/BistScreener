@@ -35,6 +35,10 @@ struct StrategyConfig: Codable, Equatable {
     /// BUY minimum skor (non-linear scoring ile kalibre)
     var minScore: Int = 52
 
+    /// SoftMode'da ek kalite kapısı (noise azaltma)
+    /// total bu skorun altındaysa sinyal üretilmez.
+    var softModeMinQualityScore: Int = 48
+
     // MARK: - Regime-based dynamic min score
 
     /// Bull rejimde base minScore'a eklenecek delta
@@ -160,6 +164,7 @@ struct StrategyConfig: Codable, Equatable {
         case maxRangeCompression
         case maxTodayChangePct
         case minScore
+        case softModeMinQualityScore
         case regimeBullDelta
         case regimeSidewaysDelta
         case regimeBearDelta
@@ -193,6 +198,7 @@ struct StrategyConfig: Codable, Equatable {
         maxRangeCompression = try c.decodeIfPresent(Double.self, forKey: .maxRangeCompression) ?? maxRangeCompression
         maxTodayChangePct = try c.decodeIfPresent(Double.self, forKey: .maxTodayChangePct) ?? maxTodayChangePct
         minScore = try c.decodeIfPresent(Int.self, forKey: .minScore) ?? minScore
+        softModeMinQualityScore = try c.decodeIfPresent(Int.self, forKey: .softModeMinQualityScore) ?? softModeMinQualityScore
 
         regimeBullDelta = try c.decodeIfPresent(Int.self, forKey: .regimeBullDelta) ?? regimeBullDelta
         regimeSidewaysDelta = try c.decodeIfPresent(Int.self, forKey: .regimeSidewaysDelta) ?? regimeSidewaysDelta
