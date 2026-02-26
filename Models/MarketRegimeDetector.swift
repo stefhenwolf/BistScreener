@@ -16,7 +16,7 @@ enum MarketRegime {
 
 struct MarketRegimeDetector {
 
-    static func detect(from candles: [Candle]) -> MarketRegime {
+    static func detect(from candles: [Candle], config: StrategyConfig = .load()) -> MarketRegime {
 
         let closes = candles.map(\.close)
 
@@ -50,23 +50,23 @@ struct MarketRegimeDetector {
         let atrPct = (ATR.volatilityRatio(candles: candles) ?? 0) * 100
 
         // Trend gücü çok düşükse direkt yatay.
-        if adx < 16 {
+        if adx < config.regimeMinADX {
             return .sideways
         }
 
         // Aşırı oynak ama trend gücü yeterince net değilse yatay/karmaşa kabul et.
-        if atrPct >= 7.5 && adx < 22 {
+        if atrPct >= config.regimeHighVolATRPercent && adx < config.regimeMinADXWhenHighVol {
             return .sideways
         }
 
         // Aşırı şok volatilite dönemlerinde yanlış bull/bear etiketinden kaçın.
-        if atrPct >= 9.5 {
+        if atrPct >= config.regimeShockATRPercent {
             return .sideways
         }
 
-        if fast > slow && rsi > 52 && adx >= 20 {
+        if fast > slow && rsi > 52 && adx >= config.regimeTrendADX {
             return .bull
-        } else if fast < slow && rsi < 48 && adx >= 20 {
+        } else if fast < slow && rsi < 48 && adx >= config.regimeTrendADX {
             return .bear
         } else {
             return .sideways

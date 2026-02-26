@@ -49,6 +49,23 @@ struct StrategyConfig: Codable, Equatable {
     /// Bear rejimde minimum taban skor
     var regimeBearMinScore: Int = 75
 
+    // MARK: - Regime detection filters (ADX/Volatility)
+
+    /// ADX bunun altındaysa piyasa yönsüz kabul edilir.
+    var regimeMinADX: Double = 16.0
+
+    /// ATR/Close (%) bu değerin üstünde ve ADX zayıfsa sideways'e zorla.
+    var regimeHighVolATRPercent: Double = 7.5
+
+    /// ATR/Close (%) bu değerin üstünde ise şok volatilite: sideways.
+    var regimeShockATRPercent: Double = 9.5
+
+    /// Yüksek volatilitede en az bu ADX yoksa trend kabul edilmez.
+    var regimeMinADXWhenHighVol: Double = 22.0
+
+    /// Bull/Bear etiketlemek için minimum ADX.
+    var regimeTrendADX: Double = 20.0
+
     // MARK: - Weights (toplam normalize edilir, oran önemli)
     //
     // v2 Ağırlık Felsefesi:
@@ -147,6 +164,11 @@ struct StrategyConfig: Codable, Equatable {
         case regimeSidewaysDelta
         case regimeBearDelta
         case regimeBearMinScore
+        case regimeMinADX
+        case regimeHighVolATRPercent
+        case regimeShockATRPercent
+        case regimeMinADXWhenHighVol
+        case regimeTrendADX
         case weightProximity
         case weightVolumeTrend
         case weightCLV
@@ -176,6 +198,11 @@ struct StrategyConfig: Codable, Equatable {
         regimeSidewaysDelta = try c.decodeIfPresent(Int.self, forKey: .regimeSidewaysDelta) ?? regimeSidewaysDelta
         regimeBearDelta = try c.decodeIfPresent(Int.self, forKey: .regimeBearDelta) ?? regimeBearDelta
         regimeBearMinScore = try c.decodeIfPresent(Int.self, forKey: .regimeBearMinScore) ?? regimeBearMinScore
+        regimeMinADX = try c.decodeIfPresent(Double.self, forKey: .regimeMinADX) ?? regimeMinADX
+        regimeHighVolATRPercent = try c.decodeIfPresent(Double.self, forKey: .regimeHighVolATRPercent) ?? regimeHighVolATRPercent
+        regimeShockATRPercent = try c.decodeIfPresent(Double.self, forKey: .regimeShockATRPercent) ?? regimeShockATRPercent
+        regimeMinADXWhenHighVol = try c.decodeIfPresent(Double.self, forKey: .regimeMinADXWhenHighVol) ?? regimeMinADXWhenHighVol
+        regimeTrendADX = try c.decodeIfPresent(Double.self, forKey: .regimeTrendADX) ?? regimeTrendADX
 
         weightProximity = try c.decodeIfPresent(Double.self, forKey: .weightProximity) ?? weightProximity
         weightVolumeTrend = try c.decodeIfPresent(Double.self, forKey: .weightVolumeTrend) ?? weightVolumeTrend

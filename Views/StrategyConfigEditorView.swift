@@ -18,6 +18,7 @@ struct StrategyConfigEditorView: View {
                 compressionCard
                 todayChangeCard
                 regimeCard
+                regimeFilterCard
                 weightsCard
                 scoreCard
                 qualityBandsCard
@@ -142,6 +143,20 @@ struct StrategyConfigEditorView: View {
                 StepperRowInt(title: "Bear Delta", value: $cfg.regimeBearDelta, range: -10...30, step: 1)
                 StepperRowInt(title: "Bear Min Score", value: $cfg.regimeBearMinScore, range: 50...95, step: 1)
                 hint("Efektif eşik = preset minScore + rejim delta. Bear için ayrıca taban skor uygulanır.")
+            }
+        }
+    }
+
+    private var regimeFilterCard: some View {
+        TVCard {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("Rejim Filtreleri (ADX / Volatilite)")
+                doubleSliderRow("Min ADX (Sideways altı)", value: $cfg.regimeMinADX, range: 8...30, step: 0.5)
+                doubleSliderRow("Trend ADX (Bull/Bear)", value: $cfg.regimeTrendADX, range: 10...35, step: 0.5)
+                doubleSliderRow("High Vol ATR%", value: $cfg.regimeHighVolATRPercent, range: 4...15, step: 0.25)
+                doubleSliderRow("High Vol için Min ADX", value: $cfg.regimeMinADXWhenHighVol, range: 12...40, step: 0.5)
+                doubleSliderRow("Shock ATR%", value: $cfg.regimeShockATRPercent, range: 6...20, step: 0.25)
+                hint("ATR/Close % çok yükselince rejimi sideways'e zorlayarak gürültülü dönemlerde false bull/bear azaltılır.")
             }
         }
     }
