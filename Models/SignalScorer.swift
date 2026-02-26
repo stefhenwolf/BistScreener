@@ -220,6 +220,33 @@ enum SignalScorer {
         return 0.10
     }
 
+    /// Ertesi gün +%5 yapabilme kapasitesi (0..1)
+    /// Bileşenler:
+    /// - ATR%: gün içi hareket potansiyeli
+    /// - Son 20 gündeki max günlük getiri: geçmişte patlama üretmiş mi?
+    private static func scoreNextDay5Capacity(atrPct: Double, maxDailyReturn20: Double) -> Double {
+        let atrScore: Double
+        switch atrPct {
+        case ..<2.0: atrScore = 0.05
+        case ..<2.8: atrScore = 0.20
+        case ..<3.5: atrScore = 0.40
+        case ..<4.5: atrScore = 0.65
+        case ..<6.0: atrScore = 0.85
+        default:     atrScore = 1.0
+        }
+
+        let histScore: Double
+        switch maxDailyReturn20 {
+        case ..<2.5: histScore = 0.05
+        case ..<3.5: histScore = 0.20
+        case ..<4.5: histScore = 0.45
+        case ..<5.5: histScore = 0.75
+        default:     histScore = 1.0
+        }
+
+        return min(1.0, max(0, atrScore * 0.55 + histScore * 0.45))
+    }
+
     /// Momentum Adjustment: Küçük pozitif hareket = alıcı momentum (bonus)
     /// +0.5% ile +3% arası: Gaussian bonus (peak ~+5 puan @ %1.5)
     /// +5% üzeri: Ceza (uzamış, giriş riskli)
@@ -570,6 +597,15 @@ enum SignalScorer {
         let trMedian20 = Rolling.medianLast(trSeries, window: 20) ?? 1
         let trSpikeMultiple = trMedian20 > 0 ? (trToday / trMedian20) : 1.0
 
+        // ---------- Next day +5 capacity
+        let atrPct = (ATR.volatilityRatio(candles: candles) ?? 0) * 100
+        let dailyReturns20: [Double] = (1..<min(21, closes.count)).compactMap { i in
+            let idx = closes.count - 1 - i
+            guard idx > 0 else { return nil }
+            return ((closes[idx] - closes[idx - 1]) / closes[idx - 1]) * 100
+        }
+        let maxDailyReturn20 = dailyReturns20.max() ?? 0
+
         // ---------- Compression check (for breakdown display)
         let compression = compressionOK(candles: candles, window: 8)
 
@@ -582,6 +618,12 @@ enum SignalScorer {
         let volScore   = scoreVolumeTrendNonLinear(volumeTrend)
         let compScore  = scoreCompressionNonLinear(rangeCompression)
         let trendScore = scoreTrend(lastClose: last.close, ema20: ema20, ema50: ema50)
+        let capScore   = scoreNextDay5Capacity(atrPct: atrPct, maxDailyReturn20: maxDailyReturn20)
+
+        // SoftMode'da bile +5 kapasite tabanı
+        if softMode && capScore < config.minNextDay5CapacityScore {
+            return nil
+        }
 
         // Ağırlıklar (config'ten, kullanıcı ayarlayabilir)
         let wP = config.weightProximity      // default 35
@@ -589,8 +631,9 @@ enum SignalScorer {
         let wC = config.weightCLV            // default 20
         let wR = config.weightCompression    // default 15
         let wT = config.weightTrend          // default 10
+        let wN = config.weightNextDay5Capacity // default 8
 
-        let wTotal = wP + wV + wC + wR + wT
+        let wTotal = wP + wV + wC + wR + wT + wN
         let normalizer = wTotal > 0 ? (100.0 / wTotal) : 1.0
 
         // Ağırlıklı toplam → 0..100
@@ -598,7 +641,8 @@ enum SignalScorer {
                         volScore   * wV +
                         clvScore   * wC +
                         compScore  * wR +
-                        trendScore * wT) * normalizer
+                        trendScore * wT +
+                        capScore   * wN) * normalizer
 
         // Momentum adjustment (bonus + ceza)
         let momAdj = momentumAdjustment(todayChangePct)
@@ -638,6 +682,7 @@ enum SignalScorer {
         if compScore >= 0.6  { reasons.append("Sıkışma") }
         if clvScore >= 0.7   { reasons.append("Güçlü Kapanış") }
         if trendScore >= 0.8 { reasons.append("Trend Yukarı") }
+        if capScore >= 0.7   { reasons.append("+5 Kapasite") }
         reasons = Array(reasons.prefix(3))
         if reasons.isEmpty { reasons.append("Pre-Breakout") }
 
@@ -676,6 +721,7 @@ enum SignalScorer {
             String(format: "Hacim x%.1f", volumeTrend),
             String(format: "Sıkışma %.2f", rangeCompression),
             String(format: "Bugün %+.1f%%", todayChangePct),
+            String(format: "+5 Kapasite %.2f", capScore),
             "Dinamik Eşik \(minScoreGate)"
         ]
 

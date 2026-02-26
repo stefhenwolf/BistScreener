@@ -70,6 +70,11 @@ struct StrategyConfig: Codable, Equatable {
     /// Bull/Bear etiketlemek için minimum ADX.
     var regimeTrendADX: Double = 20.0
 
+    // MARK: - +5% ertesi gün kapasite filtresi
+
+    /// ATR% + son 20 gündeki max günlük getiri ile üretilen kapasite skorunun alt sınırı (0..1)
+    var minNextDay5CapacityScore: Double = 0.35
+
     // MARK: - Weights (toplam normalize edilir, oran önemli)
     //
     // v2 Ağırlık Felsefesi:
@@ -84,6 +89,7 @@ struct StrategyConfig: Codable, Equatable {
     var weightCLV: Double = 20
     var weightCompression: Double = 15
     var weightTrend: Double = 10
+    var weightNextDay5Capacity: Double = 8
 
     // MARK: - Quality bands (non-linear skorlama ile kalibre)
 
@@ -174,11 +180,13 @@ struct StrategyConfig: Codable, Equatable {
         case regimeShockATRPercent
         case regimeMinADXWhenHighVol
         case regimeTrendADX
+        case minNextDay5CapacityScore
         case weightProximity
         case weightVolumeTrend
         case weightCLV
         case weightCompression
         case weightTrend
+        case weightNextDay5Capacity
         case qualityAPlus
         case qualityA
         case qualityB
@@ -209,12 +217,14 @@ struct StrategyConfig: Codable, Equatable {
         regimeShockATRPercent = try c.decodeIfPresent(Double.self, forKey: .regimeShockATRPercent) ?? regimeShockATRPercent
         regimeMinADXWhenHighVol = try c.decodeIfPresent(Double.self, forKey: .regimeMinADXWhenHighVol) ?? regimeMinADXWhenHighVol
         regimeTrendADX = try c.decodeIfPresent(Double.self, forKey: .regimeTrendADX) ?? regimeTrendADX
+        minNextDay5CapacityScore = try c.decodeIfPresent(Double.self, forKey: .minNextDay5CapacityScore) ?? minNextDay5CapacityScore
 
         weightProximity = try c.decodeIfPresent(Double.self, forKey: .weightProximity) ?? weightProximity
         weightVolumeTrend = try c.decodeIfPresent(Double.self, forKey: .weightVolumeTrend) ?? weightVolumeTrend
         weightCLV = try c.decodeIfPresent(Double.self, forKey: .weightCLV) ?? weightCLV
         weightCompression = try c.decodeIfPresent(Double.self, forKey: .weightCompression) ?? weightCompression
         weightTrend = try c.decodeIfPresent(Double.self, forKey: .weightTrend) ?? weightTrend
+        weightNextDay5Capacity = try c.decodeIfPresent(Double.self, forKey: .weightNextDay5Capacity) ?? weightNextDay5Capacity
 
         qualityAPlus = try c.decodeIfPresent(Int.self, forKey: .qualityAPlus) ?? qualityAPlus
         qualityA = try c.decodeIfPresent(Int.self, forKey: .qualityA) ?? qualityA

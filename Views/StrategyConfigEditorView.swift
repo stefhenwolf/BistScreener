@@ -170,8 +170,9 @@ struct StrategyConfigEditorView: View {
                 doubleSliderRow("w CLV", value: $cfg.weightCLV, range: 0...60, step: 1)
                 doubleSliderRow("w Compression", value: $cfg.weightCompression, range: 0...60, step: 1)
                 doubleSliderRow("w Trend (EMA)", value: $cfg.weightTrend, range: 0...30, step: 1)
+                doubleSliderRow("w +5 Capacity", value: $cfg.weightNextDay5Capacity, range: 0...30, step: 1)
 
-                let sum = cfg.weightProximity + cfg.weightVolumeTrend + cfg.weightCLV + cfg.weightCompression + cfg.weightTrend
+                let sum = cfg.weightProximity + cfg.weightVolumeTrend + cfg.weightCLV + cfg.weightCompression + cfg.weightTrend + cfg.weightNextDay5Capacity
                 Text("Toplam: \(Int(sum))")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(sum >= 95 && sum <= 105 ? TVTheme.up : TVTheme.down)
@@ -187,6 +188,7 @@ struct StrategyConfigEditorView: View {
                 sectionTitle("Eşik")
                 StepperRowInt(title: "Min Score", value: $cfg.minScore, range: 0...100, step: 1)
                 StepperRowInt(title: "SoftMode Min Quality", value: $cfg.softModeMinQualityScore, range: 0...100, step: 1)
+                doubleSliderRow("Min +5 Capacity Score", value: $cfg.minNextDay5CapacityScore, range: 0.0...1.0, step: 0.05)
                 StepperRowInt(title: "Lookback Days", value: $cfg.lookbackDays, range: 10...60, step: 1)
                 hint("SoftMode Min Quality, softMode açık olsa bile minimum kalite kapısı uygular. Öneri: Relaxed 45 / Normal 50 / Strict 58. Lookback yalnızca Normal preset'te aktif.")
             }
