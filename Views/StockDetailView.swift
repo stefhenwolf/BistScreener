@@ -581,9 +581,10 @@ struct StockDetailView: View {
                 minCount: 160,
                 forceRefresh: forceRefresh
             )
-            self.candles = fetched
+            let sorted = fetched.sorted { $0.date < $1.date }
+            self.candles = sorted
             if forceRefresh || selectedCandle == nil {
-                self.selectedCandle = fetched.last
+                self.selectedCandle = sorted.last
             }
         } catch {
             self.errorText = error.localizedDescription
