@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct StockDetailView: View {
 
@@ -22,6 +25,7 @@ struct StockDetailView: View {
 
     @State private var candles: [Candle] = []
     @State private var selectedCandle: Candle?
+    @State private var lastSelectionHapticDate: Date?
 
     /// candles -> PatternDetector (UI amaçlı)
     @State private var patterns: [CandlePatternScore] = []
@@ -141,6 +145,13 @@ struct StockDetailView: View {
         .task(id: symbol) { await loadInitial() }
         .animation(.snappy, value: candles.count)
         .animation(.snappy, value: patterns.count)
+        .onChange(of: selectedCandle?.date) { newDate in
+            guard let d = newDate, d != lastSelectionHapticDate else { return }
+            lastSelectionHapticDate = d
+#if canImport(UIKit)
+            UISelectionFeedbackGenerator().selectionChanged()
+#endif
+        }
         .tvBackground()
     }
 
@@ -444,7 +455,8 @@ struct StockDetailView: View {
 
             CandlestickChartView(
                 candles: shownCandles,
-                selected: $selectedCandle
+                selected: $selectedCandle,
+                fitToWidth: false
             )
             .padding(10)
         }
@@ -475,7 +487,7 @@ struct StockDetailView: View {
                     .foregroundStyle(TVTheme.subtext)
             } else {
                 VStack(spacing: 10) {
-                    ForEach(patterns.sorted { $0.score > $1.score }.prefix(10), id: \.id) { p in
+                    ForEach(Array(patterns.sorted { $0.score > $1.score }.prefix(10).enumerated()), id: \.element.id) { idx, p in
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(p.pattern.rawValue)
@@ -504,6 +516,15 @@ struct StockDetailView: View {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .stroke(TVTheme.stroke, lineWidth: 1)
                         )
+                        .onTapGesture {
+                            // Pattern'e dokununca günler arasında hızlı gezinme:
+                            // üstteki pattern son güne, alttakiler geçmiş günlere odaklanır.
+                            guard !shownCandles.isEmpty else { return }
+                            let target = max(0, shownCandles.count - 1 - idx)
+                            withAnimation(.snappy) {
+                                selectedCandle = shownCandles[target]
+                            }
+                        }
                     }
                 }
             }

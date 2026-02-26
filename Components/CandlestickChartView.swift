@@ -5,10 +5,15 @@
 //  Created by Sedat Pala on 18.02.2026.
 //
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct CandlestickChartView: View {
     let candles: [Candle]
     @Binding var selected: Candle?
+
+    @State private var lastSelectedDateForHaptic: Date?
 
     /// ✅ true: yatay scroll yok, ekrana sığacak kadar son mum gösterilir
     let fitToWidth: Bool
@@ -57,7 +62,7 @@ struct CandlestickChartView: View {
                             CandleStickBar(candle: c, y: y, isSelected: isSel)
                                 .frame(width: bw, height: chartHeight)
                                 .contentShape(Rectangle())
-                                .onTapGesture { selected = c }
+                                .onTapGesture { updateSelection(c) }
                         }
                     }
 
@@ -74,6 +79,17 @@ struct CandlestickChartView: View {
                 }
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard !visible.isEmpty else { return }
+                            let unit = bw + barSpacing
+                            let localX = max(0, min(value.location.x - horizontalPadding, CGFloat(visible.count) * unit))
+                            let idx = min(max(Int(localX / max(unit, 0.1)), 0), visible.count - 1)
+                            updateSelection(visible[idx])
+                        }
+                )
 
             } else {
                 // Eski davranış: yatay scroll
@@ -87,7 +103,7 @@ struct CandlestickChartView: View {
                                 CandleStickBar(candle: c, y: y, isSelected: isSel)
                                     .frame(width: 12, height: chartHeight)
                                     .contentShape(Rectangle())
-                                    .onTapGesture { selected = c }
+                                    .onTapGesture { updateSelection(c) }
                             }
                         }
 
@@ -110,6 +126,20 @@ struct CandlestickChartView: View {
         .onAppear {
             if selected == nil { selected = candles.last }
         }
+    }
+
+    private func updateSelection(_ candle: Candle) {
+        selected = candle
+        triggerSelectionHapticIfNeeded(for: candle)
+    }
+
+    private func triggerSelectionHapticIfNeeded(for candle: Candle) {
+        guard lastSelectedDateForHaptic != candle.date else { return }
+        lastSelectedDateForHaptic = candle.date
+#if canImport(UIKit)
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+#endif
     }
 
     // MARK: - Fit helpers
