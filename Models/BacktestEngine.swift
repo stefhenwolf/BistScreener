@@ -25,10 +25,10 @@ struct BacktestExitConfig: Codable, Equatable {
     var cooldownDays: Int = 3
 
     /// Komisyon (tek yön, bps). 10 bps = %0.10
-    var commissionBps: Double = 10.0
+    var commissionBps: Double = 12.0
 
     /// Slippage (tek yön, bps). 5 bps = %0.05
-    var slippageBps: Double = 5.0
+    var slippageBps: Double = 8.0
 
     /// Eski tek TP alanı uyumluluğu (TP2 = ana hedef)
     var takeProfitPct: Double {
@@ -57,8 +57,8 @@ struct BacktestExitConfig: Codable, Equatable {
         stopLossPct: Double = 6.0,
         maxHoldDays: Int = 30,
         cooldownDays: Int = 3,
-        commissionBps: Double = 10.0,
-        slippageBps: Double = 5.0
+        commissionBps: Double = 12.0,
+        slippageBps: Double = 8.0
     ) {
         self.tp1Pct = tp1Pct
         self.tp2Pct = tp2Pct
@@ -80,8 +80,8 @@ struct BacktestExitConfig: Codable, Equatable {
         stopLossPct = try c.decodeIfPresent(Double.self, forKey: .stopLossPct) ?? 6.0
         maxHoldDays = try c.decodeIfPresent(Int.self, forKey: .maxHoldDays) ?? 30
         cooldownDays = try c.decodeIfPresent(Int.self, forKey: .cooldownDays) ?? 3
-        commissionBps = try c.decodeIfPresent(Double.self, forKey: .commissionBps) ?? 10.0
-        slippageBps = try c.decodeIfPresent(Double.self, forKey: .slippageBps) ?? 5.0
+        commissionBps = try c.decodeIfPresent(Double.self, forKey: .commissionBps) ?? 12.0
+        slippageBps = try c.decodeIfPresent(Double.self, forKey: .slippageBps) ?? 8.0
         normalize()
     }
 

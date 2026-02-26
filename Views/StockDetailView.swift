@@ -39,6 +39,8 @@ struct StockDetailView: View {
     @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
     @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
+    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
+    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
 
     // MARK: - Env
 
@@ -274,8 +276,12 @@ struct StockDetailView: View {
         let price = candles.last?.close ?? 0
         let cfg = savedExitConfig
 
+        let totalBps = (commissionBps + slippageBps) / 10_000.0
+        let entryNet = price * (1.0 + totalBps)
         let tpPrice = price * (1.0 + cfg.takeProfitPct / 100.0)
         let slPrice = price * (1.0 - cfg.stopLossPct / 100.0)
+        let tpNet = tpPrice * (1.0 - totalBps)
+        let slNet = slPrice * (1.0 - totalBps)
         let signalDate = shownCandles.last?.date ?? snapshot?.lastDate ?? Date()
         let projectedExit = Calendar.current.date(byAdding: .day, value: cfg.maxHoldDays, to: signalDate) ?? signalDate
 
@@ -311,6 +317,7 @@ struct StockDetailView: View {
                 HStack(spacing: 12) {
                     exitMiniChip("Max: \(cfg.maxHoldDays) gün", TVTheme.subtext)
                     exitMiniChip("Giriş: \(String(format: "%.2f", price))", TVTheme.text)
+                    exitMiniChip("Maliyet: \(Int(commissionBps + slippageBps)) bps/tek yön", TVTheme.subtext)
                 }
 
                 HStack(spacing: 12) {
@@ -320,9 +327,11 @@ struct StockDetailView: View {
 
                 // Risk/Reward
                 if cfg.stopLossPct > 0 {
-                    let rr = cfg.takeProfitPct / cfg.stopLossPct
+                    let netRewardPct = entryNet > 0 ? ((tpNet - entryNet) / entryNet) * 100.0 : 0
+                    let netRiskPct = entryNet > 0 ? ((entryNet - slNet) / entryNet) * 100.0 : 0
+                    let rr = netRiskPct > 0 ? netRewardPct / netRiskPct : 0
                     HStack(spacing: 6) {
-                        Text("Risk/Reward:")
+                        Text("Net Risk/Reward:")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(TVTheme.subtext)
                         Text(String(format: "1:%.1f", rr))

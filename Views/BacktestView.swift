@@ -18,8 +18,8 @@ struct BacktestView: View {
     @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
     @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
-    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 10
-    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 5
+    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
+    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
     @AppStorage(BacktestKeys.minPerPositionTL) private var minPerPositionTL: Double = 400
     @AppStorage(BacktestKeys.maxPerPositionTL) private var maxPerPositionTL: Double = 5_000
     @AppStorage(BacktestKeys.addOnMode) private var addOnMode: Int = 0
@@ -361,6 +361,22 @@ struct BacktestView: View {
                 }
 
                 // Config summary
+                HStack {
+                    Button("BIST Varsayılan BPS") {
+                        commissionBps = 12
+                        slippageBps = 8
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(TVTheme.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(TVTheme.surface2)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+
+                    Spacer()
+                }
+
                 HStack(spacing: 8) {
                     miniChip("TP1 +\(String(format: "%.1f", tp1Pct))%", TVTheme.up)
                     miniChip("TP2 +\(String(format: "%.1f", tp2Pct))%", TVTheme.up)

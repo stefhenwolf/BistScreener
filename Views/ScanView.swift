@@ -356,6 +356,8 @@ private struct ScanRowTV: View {
     @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
     @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
+    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
+    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
 
     private var changeText: String { String(format: "%+.2f%%", r.changePct) }
     private var qualityText: String { r.uiQuality }
@@ -492,9 +494,15 @@ private struct ScanRowTV: View {
             cooldownDays: Int(cooldownDays)
         )
 
+        let totalBps = (commissionBps + slippageBps) / 10_000.0
+        let entryNet = price * (1.0 + totalBps)
         let tpPrice = price * (1.0 + cfg.takeProfitPct / 100.0)
         let slPrice = price * (1.0 - cfg.stopLossPct / 100.0)
-        let rr = cfg.stopLossPct > 0 ? cfg.takeProfitPct / cfg.stopLossPct : 0
+        let tpNet = tpPrice * (1.0 - totalBps)
+        let slNet = slPrice * (1.0 - totalBps)
+        let netRewardPct = entryNet > 0 ? ((tpNet - entryNet) / entryNet) * 100.0 : 0
+        let netRiskPct = entryNet > 0 ? ((entryNet - slNet) / entryNet) * 100.0 : 0
+        let rr = netRiskPct > 0 ? netRewardPct / netRiskPct : 0
         let expectedR = rr * qualityMultiplier(qualityText)
 
         return HStack(spacing: 6) {
@@ -528,7 +536,7 @@ private struct ScanRowTV: View {
             HStack(spacing: 3) {
                 Text("⚖️")
                     .font(.system(size: 9))
-                Text(String(format: "1:%.1f", rr))
+                Text(String(format: "Net 1:%.1f", rr))
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(rr >= 2.5 ? TVTheme.up : (rr >= 1.5 ? .orange : TVTheme.down))
             }
