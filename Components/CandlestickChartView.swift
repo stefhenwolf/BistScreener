@@ -166,12 +166,15 @@ struct CandlestickChartView: View {
                                 let unit = max(zoomedWidth + barSpacing, 1)
                                 let projectedBars = Int((value.predictedEndTranslation.width / unit).rounded())
                                 let start = dragStartHorizontalOffset ?? horizontalBarOffset
-                                withAnimation(.interpolatingSpring(stiffness: 180, damping: 24)) {
-                                    horizontalBarOffset = clampedHorizontalOffset(start + projectedBars, width: geo.size.width)
+                                // Soft-Balanced momentum: projected hareketin tamamını değil bir kısmını uygula
+                                let softenedBars = Int((Double(projectedBars) * 0.65).rounded())
+                                withAnimation(.interpolatingSpring(stiffness: 170, damping: 28)) {
+                                    horizontalBarOffset = clampedHorizontalOffset(start + softenedBars, width: geo.size.width)
                                 }
                             } else {
-                                let projected = value.predictedEndTranslation.height
-                                withAnimation(.interpolatingSpring(stiffness: 180, damping: 24)) {
+                                // Dikey pan: daha yumuşak ve kontrollü
+                                let projected = value.predictedEndTranslation.height * 0.55
+                                withAnimation(.interpolatingSpring(stiffness: 165, damping: 30)) {
                                     verticalPan = min(max(projected, -chartHeight * 0.35), chartHeight * 0.35)
                                 }
                             }
@@ -181,7 +184,10 @@ struct CandlestickChartView: View {
                 .simultaneousGesture(
                     MagnificationGesture()
                         .onChanged { value in
-                            zoomScale = min(max(value, 0.7), 2.4)
+                            // Zoom kontrollü: ani sıçramayı azalt
+                            let clamped = min(max(value, 0.75), 2.2)
+                            zoomScale = (zoomScale * 0.82) + (clamped * 0.18)
+                            zoomScale = min(max(zoomScale, 0.75), 2.2)
                             horizontalBarOffset = clampedHorizontalOffset(horizontalBarOffset, width: geo.size.width)
                         }
                 )
