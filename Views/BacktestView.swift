@@ -18,6 +18,8 @@ struct BacktestView: View {
     @AppStorage(BacktestKeys.stopLossPct) private var stopLossPct: Double = 6.0
     @AppStorage(BacktestKeys.maxHoldDays) private var maxHoldDays: Double = 30
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
+    @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 10
+    @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 5
     @AppStorage(BacktestKeys.minPerPositionTL) private var minPerPositionTL: Double = 400
     @AppStorage(BacktestKeys.maxPerPositionTL) private var maxPerPositionTL: Double = 5_000
     @AppStorage(BacktestKeys.addOnMode) private var addOnMode: Int = 0
@@ -36,7 +38,9 @@ struct BacktestView: View {
             tp1SellPercent: tp1SellPercent,
             stopLossPct: stopLossPct,
             maxHoldDays: Int(maxHoldDays),
-            cooldownDays: Int(cooldownDays)
+            cooldownDays: Int(cooldownDays),
+            commissionBps: commissionBps,
+            slippageBps: slippageBps
         )
     }
 
@@ -106,6 +110,8 @@ struct BacktestView: View {
             stopLossPct = min(max(stopLossPct, 2), 15)
             maxHoldDays = min(max(maxHoldDays, 5), 60)
             cooldownDays = min(max(cooldownDays, 0), 10)
+            commissionBps = min(max(commissionBps, 0), 100)
+            slippageBps = min(max(slippageBps, 0), 100)
             minPerPositionTL = min(max(minPerPositionTL, 100), hardMaxPerPositionTL)
             maxPerPositionTL = min(max(maxPerPositionTL, 100), hardMaxPerPositionTL)
             if minPerPositionTL > maxPerPositionTL {
@@ -298,6 +304,22 @@ struct BacktestView: View {
                 )
 
                 sliderRow(
+                    title: "💸 Komisyon (tek yön)",
+                    value: $commissionBps,
+                    range: 0...100,
+                    step: 1,
+                    format: "%.0f bps"
+                )
+
+                sliderRow(
+                    title: "↔️ Slippage (tek yön)",
+                    value: $slippageBps,
+                    range: 0...100,
+                    step: 1,
+                    format: "%.0f bps"
+                )
+
+                sliderRow(
                     title: "💵 Hisse Başı Min",
                     value: $minPerPositionTL,
                     range: 100...5_000,
@@ -345,12 +367,14 @@ struct BacktestView: View {
                     miniChip("TP1 Sat %\(Int(tp1SellPercent))", TVTheme.subtext)
                     miniChip("SL -\(String(format: "%.1f", stopLossPct))%", TVTheme.down)
                     miniChip("\(Int(maxHoldDays))g", TVTheme.subtext)
+                    miniChip("Kom \(Int(commissionBps))bps", TVTheme.subtext)
+                    miniChip("Slip \(Int(slippageBps))bps", TVTheme.subtext)
                     miniChip("Min ₺\(Int(minPerPositionTL))", TVTheme.subtext)
                     miniChip("Max ₺\(Int(maxPerPositionTL))", TVTheme.subtext)
                     miniChip(addOnModeLabel, TVTheme.subtext)
                 }
 
-                Text("Sinyal günü kapanışta giriş → TP1'de kısmi satış, TP2/SL/MaxDays ile kalan lot yönetimi. Nakit o günün önerilerine tek tur paylaştırılır; hisse başı min/max tutarları uygulanır.")
+                Text("Sinyal günü kapanışta giriş → TP1'de kısmi satış, TP2/SL/MaxDays ile kalan lot yönetimi. Komisyon + slippage tek yön bps olarak net getiriye uygulanır. Nakit o günün önerilerine tek tur paylaştırılır; hisse başı min/max tutarları uygulanır.")
                     .font(.footnote)
                     .foregroundStyle(TVTheme.subtext)
             }

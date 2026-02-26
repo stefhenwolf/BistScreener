@@ -11,6 +11,8 @@ enum BacktestKeys {
     static let stopLossPct     = "backtest.exit.stopLossPct"
     static let maxHoldDays     = "backtest.exit.maxHoldDays"
     static let cooldownDays    = "backtest.exit.cooldownDays"
+    static let commissionBps   = "backtest.exit.commissionBps"
+    static let slippageBps     = "backtest.exit.slippageBps"
 
     // Portfolio Management
     static let minPerPositionTL = "backtest.portfolio.minPerPositionTL"
