@@ -97,33 +97,43 @@ struct CandlestickChartView: View {
                 // TradingView-benzeri: yatay scroll + pinch zoom + long-press lock
                 let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
 
-                ScrollView(.horizontal, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        LazyHStack(spacing: barSpacing) {
-                            ForEach(candles.indices, id: \.self) { i in
-                                let c = candles[i]
-                                let isSel = (selectedDate == c.date)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LazyHStack(spacing: barSpacing) {
+                                ForEach(candles.indices, id: \.self) { i in
+                                    let c = candles[i]
+                                    let isSel = (selectedDate == c.date)
 
-                                CandleStickBar(candle: c, y: y, isSelected: isSel)
-                                    .frame(width: zoomedWidth, height: chartHeight)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { updateSelection(c) }
+                                    CandleStickBar(candle: c, y: y, isSelected: isSel)
+                                        .frame(width: zoomedWidth, height: chartHeight)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { updateSelection(c) }
+                                        .id("candle-\(i)")
+                                }
+                            }
+
+                            LazyHStack(spacing: barSpacing) {
+                                ForEach(candles.indices, id: \.self) { i in
+                                    let date = candles[i].date
+                                    let label = axisLabel(at: i, in: candles)
+                                    let isSel = (selectedDate == date)
+
+                                    AxisCell(label: label, isSelected: isSel)
+                                        .frame(width: zoomedWidth, height: axisHeight)
+                                }
                             }
                         }
-
-                        LazyHStack(spacing: barSpacing) {
-                            ForEach(candles.indices, id: \.self) { i in
-                                let date = candles[i].date
-                                let label = axisLabel(at: i, in: candles)
-                                let isSel = (selectedDate == date)
-
-                                AxisCell(label: label, isSelected: isSel)
-                                    .frame(width: zoomedWidth, height: axisHeight)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.vertical, 4)
+                    }
+                    .onAppear {
+                        if let lastIdx = candles.indices.last {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
                             }
                         }
                     }
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.vertical, 4)
                 }
                 .simultaneousGesture(
                     MagnificationGesture()
@@ -160,6 +170,17 @@ struct CandlestickChartView: View {
                 .clipShape(Capsule())
                 .padding(.top, 4)
                 .padding(.leading, 8)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if let s = selected {
+                Text("Seçili Gün: \(s.date.formatted(date: .complete, time: .omitted))")
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Capsule())
+                    .padding(.bottom, 2)
             }
         }
         .onAppear {
