@@ -218,6 +218,8 @@ struct ScanFilterSheet: View {
             return "Kırılıma yakın hisseleri tarar. Breakout potansiyeli yüksek olan seviyelere yakınlığı ölçer."
         case .ultraBounce:
             return "9-faktörlü ultra strateji: RSI bounce, hacim gücü, trend hizalama, pullback kalitesi ve daha fazlası. Günlük %5+ hareket potansiyeli olan hisseleri bulur."
+        case .ensemble:
+            return "Pre-Breakout + Ultra birlikte değerlendirilir. İki model onayıyla daha seçici ve daha güvenli sinyal üretir."
         }
     }
 

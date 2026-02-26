@@ -189,6 +189,7 @@ enum UltraPreset: String, Codable, CaseIterable {
 enum ScanStrategyMode: String, Codable, CaseIterable, Identifiable {
     case preBreakout = "Pre-Breakout"
     case ultraBounce = "Ultra Bounce"
+    case ensemble = "Ensemble"
 
     var id: String { rawValue }
     var title: String { rawValue }

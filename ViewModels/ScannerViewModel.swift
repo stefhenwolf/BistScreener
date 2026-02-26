@@ -353,6 +353,8 @@ final class ScannerViewModel: ObservableObject {
                         result = await self.scanOneTomorrow(symbol: symbol)
                     case .ultraBounce:
                         result = await self.scanOneUltra(symbol: symbol)
+                    case .ensemble:
+                        result = await self.scanOneEnsemble(symbol: symbol)
                     }
 
                     await sem.signal()
@@ -404,10 +406,23 @@ final class ScannerViewModel: ObservableObject {
 
         // ✅ Debug özet (Xcode console)
         #if DEBUG
-        let modeLabel = strategyMode == .ultraBounce ? "Ultra Bounce" : "Pre-Breakout"
-        let presetLabel = strategyMode == .ultraBounce
-            ? "\(ultraPreset.rawValue) | minScore: \(ultraPreset.config.minScore)"
-            : "\(preset.rawValue) | minScore: \(preset.minBuyTotal)"
+        let modeLabel: String = {
+            switch strategyMode {
+            case .preBreakout: return "Pre-Breakout"
+            case .ultraBounce: return "Ultra Bounce"
+            case .ensemble: return "Ensemble"
+            }
+        }()
+        let presetLabel: String = {
+            switch strategyMode {
+            case .preBreakout:
+                return "\(preset.rawValue) | minScore: \(preset.minBuyTotal)"
+            case .ultraBounce:
+                return "\(ultraPreset.rawValue) | minScore: \(ultraPreset.config.minScore)"
+            case .ensemble:
+                return "PB:\(preset.rawValue) + UB:\(ultraPreset.rawValue)"
+            }
+        }()
         print("""
         ═══════════════════════════════════════════
         📊 TARAMA ÖZET (\(indexSnap.title)) — \(modeLabel)
@@ -654,6 +669,84 @@ final class ScannerViewModel: ObservableObject {
             }
             #endif
             scanDebugCandleErrors += 1
+            return nil
+        }
+    }
+
+    // MARK: - Single symbol scan (Ensemble)
+
+    private func scanOneEnsemble(symbol: String) async -> ScanResult? {
+        do {
+            let candles = try await loadCandlesForScan(symbol: symbol)
+            guard candles.count >= 60 else { return nil }
+
+            let recent = Array(candles.suffix(120))
+            let last = recent[recent.count - 1]
+            let prev = recent.count >= 2 ? recent[recent.count - 2] : last
+            let changePct = ((last.close - prev.close) / max(prev.close, 0.000001)) * 100.0
+
+            let scoredPatterns = PatternDetector.detectScored(last: Array(recent.suffix(60)))
+            let regime = MarketRegimeDetector.detect(from: recent)
+
+            let pb = SignalScorer.scoreTomorrowBuyOnly(candles: recent, preset: preset, regime: regime)
+            let ub = UltraSignalScorer.score(candles: recent, config: ultraPreset.config, regime: regime)
+
+            guard let ensemble = ensembleBlend(pb: pb, ub: ub) else {
+                scanDebugScoreNil += 1
+                return nil
+            }
+
+            scanDebugPassed += 1
+            return ScanResult(
+                symbol: symbol,
+                lastDate: last.date,
+                lastClose: last.close,
+                changePct: changePct,
+                patterns: scoredPatterns,
+                tomorrowTotal: ensemble.total,
+                tomorrowQuality: ensemble.quality,
+                tomorrowTier: ensemble.tier,
+                tomorrowReasons: ensemble.reasons,
+                tomorrowBreakdown: ensemble.breakdown
+            )
+        } catch {
+            scanDebugCandleErrors += 1
+            return nil
+        }
+    }
+
+    private func ensembleBlend(pb: TomorrowSignalScore?, ub: TomorrowSignalScore?) -> TomorrowSignalScore? {
+        switch (pb, ub) {
+        case let (p?, u?):
+            let total = min(100, Int(round(Double(p.total) * 0.55 + Double(u.total) * 0.45 + 4.0)))
+            let quality: String
+            switch total {
+            case 80...: quality = "A+"
+            case 68...: quality = "A"
+            case 55...: quality = "B"
+            case 42...: quality = "C"
+            default: quality = "D"
+            }
+            var seen = Set<String>()
+            let reasonsMerged = (p.reasons + u.reasons).filter { seen.insert($0).inserted }
+            var reasons = Array(reasonsMerged.prefix(3))
+            if reasons.isEmpty { reasons = ["Ensemble"] }
+            var b = p.breakdown
+            b.notes.append("Ensemble PB+UB")
+            return TomorrowSignalScore(
+                isBuy: true,
+                total: total,
+                quality: quality,
+                signal: .buy,
+                tier: p.tier,
+                reasons: reasons,
+                breakdown: b
+            )
+        case let (p?, nil):
+            return p.total >= 68 ? p : nil
+        case let (nil, u?):
+            return u.total >= 70 ? u : nil
+        default:
             return nil
         }
     }

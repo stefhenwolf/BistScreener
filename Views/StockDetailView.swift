@@ -744,6 +744,21 @@ struct StockDetailView: View {
                 config: selectedUltraPreset.config,
                 regime: regime
             )
+        case .ensemble:
+            let regime = MarketRegimeDetector.detect(from: recent, config: StrategyConfig.load())
+            let pb = SignalScorer.scoreTomorrowBuyOnly(candles: recent, preset: selectedPreset, regime: regime)
+            let ub = UltraSignalScorer.score(candles: recent, config: selectedUltraPreset.config, regime: regime)
+            if let p = pb, let u = ub {
+                let total = min(100, Int(round(Double(p.total) * 0.55 + Double(u.total) * 0.45 + 4.0)))
+                let quality: String = total >= 80 ? "A+" : (total >= 68 ? "A" : (total >= 55 ? "B" : (total >= 42 ? "C" : "D")) )
+                var seen = Set<String>()
+                let reasons = (p.reasons + u.reasons).filter { seen.insert($0).inserted }
+                var b = p.breakdown
+                b.notes.append("Ensemble PB+UB")
+                tomorrow = TomorrowSignalScore(isBuy: true, total: total, quality: quality, signal: .buy, tier: p.tier, reasons: Array(reasons.prefix(3)), breakdown: b)
+            } else {
+                tomorrow = (pb?.total ?? 0) >= 68 ? pb : (((ub?.total ?? 0) >= 70) ? ub : nil)
+            }
         }
 
         if tomorrow == nil {
@@ -757,6 +772,12 @@ struct StockDetailView: View {
                     "Ultra Bounce eşiklerini geçemedi",
                     "Preset: \(selectedUltraPreset.title)",
                     "ATR/Trend/RSI veya hacim filtresi düşük olabilir"
+                ]
+            case .ensemble:
+                tomorrowRejectNotes = [
+                    "Ensemble onayı gelmedi",
+                    "PB ve Ultra birlikte yeterli güç üretmedi",
+                    "Eşikler: PB>=68 veya UB>=70 tekli fallback"
                 ]
             }
         } else {

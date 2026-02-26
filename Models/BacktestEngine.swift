@@ -629,13 +629,14 @@ final class BacktestEngine: ObservableObject {
                 if dayIdx > startIdx { signalSlice.append(candles[dayIdx]) }
 
                 let regime = MarketRegimeDetector.detect(from: signalSlice)
-                if strategyMode == .ultraBounce {
+                switch strategyMode {
+                case .ultraBounce:
                     signalsByDay[dayIdx] = UltraSignalScorer.score(
                         candles: signalSlice,
                         config: ultraPreset.config,
                         regime: regime
                     )
-                } else {
+                case .preBreakout:
                     scoringConfig.minScore = SignalScorer.dynamicMinScore(
                         for: preset,
                         regime: regime,
@@ -646,6 +647,23 @@ final class BacktestEngine: ObservableObject {
                         config: scoringConfig,
                         softMode: true
                     )
+                case .ensemble:
+                    scoringConfig.minScore = SignalScorer.dynamicMinScore(
+                        for: preset,
+                        regime: regime,
+                        config: scoringConfig
+                    )
+                    let pb = SignalScorer.scoreWithConfig(
+                        candles: signalSlice,
+                        config: scoringConfig,
+                        softMode: true
+                    )
+                    let ub = UltraSignalScorer.score(
+                        candles: signalSlice,
+                        config: ultraPreset.config,
+                        regime: regime
+                    )
+                    signalsByDay[dayIdx] = blendEnsembleSignal(pb: pb, ub: ub)
                 }
             }
 
@@ -750,6 +768,43 @@ final class BacktestEngine: ObservableObject {
         }
 
         return trades
+    }
+
+    nonisolated private static func blendEnsembleSignal(
+        pb: TomorrowSignalScore?,
+        ub: TomorrowSignalScore?
+    ) -> TomorrowSignalScore? {
+        switch (pb, ub) {
+        case let (p?, u?):
+            let total = min(100, Int(round(Double(p.total) * 0.55 + Double(u.total) * 0.45 + 4.0)))
+            let quality: String
+            switch total {
+            case 80...: quality = "A+"
+            case 68...: quality = "A"
+            case 55...: quality = "B"
+            case 42...: quality = "C"
+            default: quality = "D"
+            }
+            var seen = Set<String>()
+            let reasons = (p.reasons + u.reasons).filter { seen.insert($0).inserted }
+            var b = p.breakdown
+            b.notes.append("Ensemble PB+UB")
+            return TomorrowSignalScore(
+                isBuy: true,
+                total: total,
+                quality: quality,
+                signal: .buy,
+                tier: p.tier,
+                reasons: Array(reasons.prefix(3)),
+                breakdown: b
+            )
+        case let (p?, nil):
+            return p.total >= 68 ? p : nil
+        case let (nil, u?):
+            return u.total >= 70 ? u : nil
+        default:
+            return nil
+        }
     }
 
     nonisolated private static func fetchBacktestCandles(

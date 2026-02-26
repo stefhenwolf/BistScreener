@@ -605,6 +605,7 @@ struct BacktestView: View {
                 }
 
                 regimePerformanceCard(trades: s.trades)
+                walkForwardCard(trades: s.trades)
             }
         }
     }
@@ -663,6 +664,66 @@ struct BacktestView: View {
                         Text(String(format: "DD %.1f%%", st.avgDrawdown))
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(TVTheme.down)
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private struct WFFold: Identifiable {
+        let index: Int
+        let count: Int
+        let winRate: Double
+        let avgReturn: Double
+        var id: Int { index }
+    }
+
+    private func walkForwardCard(trades: [BacktestTradeResult]) -> some View {
+        let ordered = trades.sorted { $0.entryDate < $1.entryDate }
+        let foldSize = max(20, ordered.count / 4)
+        var folds: [WFFold] = []
+
+        if !ordered.isEmpty {
+            var start = 0
+            var idx = 1
+            while start < ordered.count {
+                let end = min(ordered.count, start + foldSize)
+                let chunk = Array(ordered[start..<end])
+                let wins = chunk.filter(\.isWin).count
+                let wr = chunk.isEmpty ? 0 : Double(wins) / Double(chunk.count)
+                let avg = chunk.isEmpty ? 0 : chunk.map(\.returnPct).reduce(0, +) / Double(chunk.count)
+                folds.append(WFFold(index: idx, count: chunk.count, winRate: wr, avgReturn: avg))
+                idx += 1
+                start = end
+            }
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Walk-Forward (Rolling Fold)")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(TVTheme.text)
+
+            if folds.isEmpty {
+                Text("Fold verisi yok")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(TVTheme.subtext)
+            } else {
+                ForEach(folds) { f in
+                    HStack(spacing: 8) {
+                        Text("F\(f.index)")
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(width: 28, alignment: .leading)
+                        Text("n=\(f.count)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(TVTheme.subtext)
+                        Spacer()
+                        Text(String(format: "WR %.0f%%", f.winRate * 100))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(f.winRate >= 0.55 ? TVTheme.up : TVTheme.down)
+                        Text(String(format: "Avg %+.2f%%", f.avgReturn))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(f.avgReturn >= 0 ? TVTheme.up : TVTheme.down)
                     }
                 }
             }
