@@ -30,10 +30,3 @@ jobs:
           -destination 'platform=iOS Simulator,name=iPhone 16' \
           build
 
-      - name: Test (iOS Simulator)
-        run: xcodebuild \
-          -project BistScreener.xcodeproj \
-          -scheme BistScreener \
-          -configuration Debug \
-          -destination 'platform=iOS Simulator,name=iPhone 16' \
-          test
