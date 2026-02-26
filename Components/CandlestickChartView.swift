@@ -14,7 +14,6 @@ struct CandlestickChartView: View {
     @Binding var selected: Candle?
 
     @State private var lastSelectedDateForHaptic: Date?
-    @State private var showPressDetail: Bool = false
 
     /// ✅ true: yatay scroll yok, ekrana sığacak kadar son mum gösterilir
     let fitToWidth: Bool
@@ -65,6 +64,7 @@ struct CandlestickChartView: View {
                                 .frame(width: bw, height: chartHeight)
                                 .contentShape(Rectangle())
                                 .onTapGesture { updateSelection(c) }
+                                .onLongPressGesture(minimumDuration: 0.12) { updateSelection(c) }
                         }
                     }
 
@@ -109,6 +109,7 @@ struct CandlestickChartView: View {
                                         .frame(width: zoomedWidth, height: chartHeight)
                                         .contentShape(Rectangle())
                                         .onTapGesture { updateSelection(c) }
+                                        .onLongPressGesture(minimumDuration: 0.12) { updateSelection(c) }
                                         .id("candle-\(i)")
                                 }
                             }
@@ -149,13 +150,10 @@ struct CandlestickChartView: View {
                             zoomScale = min(max(value, 0.7), 2.4)
                         }
                 )
-                .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 18, pressing: { pressing in
-                    showPressDetail = pressing
-                }, perform: {})
             }
         }
         .overlay(alignment: .topLeading) {
-            if let s = selected, showPressDetail {
+            if let s = selected {
                 HStack(spacing: 8) {
                     Text(s.date.formatted(date: .abbreviated, time: .omitted))
                     Text(String(format: "O %.2f", s.open))
@@ -174,7 +172,7 @@ struct CandlestickChartView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let s = selected, showPressDetail {
+            if let s = selected {
                 Text("Seçili Gün: \(s.date.formatted(date: .complete, time: .omitted))")
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 10)
