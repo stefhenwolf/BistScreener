@@ -60,6 +60,9 @@ struct CandlestickChartView: View {
                 return base + clampedPan
             }
 
+            let selectedVisible = visible.first { $0.date == selectedDate }
+            let selectedY = selectedVisible.map { y($0.close) }
+
             if fitToWidth {
                 // ✅ Scroll yok → ekrana sığdır
                 let bw = computedBarWidth(for: geo.size.width, count: visible.count)
@@ -102,6 +105,14 @@ struct CandlestickChartView: View {
                             updateSelection(visible[idx])
                         }
                 )
+                .overlay {
+                    if let sy = selectedY {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(height: 1)
+                            .offset(y: sy - chartHeight / 2)
+                    }
+                }
 
             } else {
                 // TradingView-benzeri manuel pencere: kusursuz yatay pan + pinch zoom
@@ -167,6 +178,14 @@ struct CandlestickChartView: View {
                 .onChange(of: candles.count) { _ in
                     horizontalBarOffset = 0
                 }
+                .overlay {
+                    if let sy = selectedY {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.18))
+                            .frame(height: 1)
+                            .offset(y: sy - chartHeight / 2)
+                    }
+                }
             }
         }
         .overlay(alignment: .topLeading) {
@@ -179,7 +198,7 @@ struct CandlestickChartView: View {
                     Text(String(format: "C %.2f", s.close))
                     if !fitToWidth { Text(String(format: "x%.1f", zoomScale)) }
                 }
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(.ultraThinMaterial)
@@ -199,14 +218,6 @@ struct CandlestickChartView: View {
                     .padding(.bottom, 2)
             }
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 8)
-                .onChanged { value in
-                    if abs(value.translation.height) > abs(value.translation.width) {
-                        verticalPan = value.translation.height
-                    }
-                }
-        )
         .onTapGesture(count: 2) {
             verticalPan = 0
         }
