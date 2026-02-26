@@ -32,6 +32,9 @@ struct StrategyConfig: Codable, Equatable {
     /// Aşırı yükselmiş günü elemek için (EOD %)
     var maxTodayChangePct: Double = 8.0
 
+    /// Spread proxy (günlük range/close %) üst sınırı — likidite/spread filtresi
+    var maxSpreadProxyPct: Double = 6.5
+
     /// BUY minimum skor (non-linear scoring ile kalibre)
     var minScore: Int = 52
 
@@ -113,6 +116,7 @@ struct StrategyConfig: Codable, Equatable {
         c.minCLV = 0.10
         c.maxRangeCompression = 3.0
         c.maxTodayChangePct = 10.0
+        c.maxSpreadProxyPct = 8.0
         c.minScore = 35
         // Ağırlıklar aynı kalır (non-linear scoring zaten yeterli)
         return c
@@ -129,6 +133,7 @@ struct StrategyConfig: Codable, Equatable {
         c.minCLV = 0.40
         c.maxRangeCompression = 1.5
         c.maxTodayChangePct = 5.0
+        c.maxSpreadProxyPct = 4.5
         c.minScore = 62
         return c
     }
@@ -169,6 +174,7 @@ struct StrategyConfig: Codable, Equatable {
         case minCLV
         case maxRangeCompression
         case maxTodayChangePct
+        case maxSpreadProxyPct
         case minScore
         case softModeMinQualityScore
         case regimeBullDelta
@@ -205,6 +211,7 @@ struct StrategyConfig: Codable, Equatable {
         minCLV = try c.decodeIfPresent(Double.self, forKey: .minCLV) ?? minCLV
         maxRangeCompression = try c.decodeIfPresent(Double.self, forKey: .maxRangeCompression) ?? maxRangeCompression
         maxTodayChangePct = try c.decodeIfPresent(Double.self, forKey: .maxTodayChangePct) ?? maxTodayChangePct
+        maxSpreadProxyPct = try c.decodeIfPresent(Double.self, forKey: .maxSpreadProxyPct) ?? maxSpreadProxyPct
         minScore = try c.decodeIfPresent(Int.self, forKey: .minScore) ?? minScore
         softModeMinQualityScore = try c.decodeIfPresent(Int.self, forKey: .softModeMinQualityScore) ?? softModeMinQualityScore
 

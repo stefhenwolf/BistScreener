@@ -14,6 +14,7 @@ final class ScannerViewModel: ObservableObject {
     @Published var progressText: String = ""
     @Published var progressValue: Double = 0
     @Published var errorText: String?
+    @Published var liveAlerts: [String] = []
 
     /// Endeks bazlı RAM cache (EN GÜNCEL sonuçlar burada)
     @Published private(set) var resultsByIndex: [IndexOption: [ScanResult]] = [:]
@@ -419,6 +420,15 @@ final class ScannerViewModel: ObservableObject {
         ═══════════════════════════════════════════
         """)
         #endif
+
+        // ✅ Canlı alarm: yeni güçlü sinyaller (A+/A)
+        let previous = resultsByIndex[indexSnap] ?? []
+        let prevStrong = Set(previous.filter { $0.uiQuality == "A+" || $0.uiQuality == "A" }.map(\.symbol))
+        let newStrong = localResults.filter { ($0.uiQuality == "A+" || $0.uiQuality == "A") && !prevStrong.contains($0.symbol) }
+        if !newStrong.isEmpty {
+            let top = newStrong.prefix(3).map { "\($0.symbol) \($0.uiQuality) \($0.uiScore)" }
+            liveAlerts = ["🟢 Yeni güçlü sinyal: " + top.joined(separator: " • ")]
+        }
 
         // ✅ RAM overwrite
         resultsByIndex[indexSnap] = localResults

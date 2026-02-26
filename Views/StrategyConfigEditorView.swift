@@ -127,9 +127,10 @@ struct StrategyConfigEditorView: View {
     private var todayChangeCard: some View {
         TVCard {
             VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("Bugün Değişim Filtresi")
+                sectionTitle("Bugün Değişim & Likidite Filtresi")
                 doubleSliderRow("Max Today Change %", value: $cfg.maxTodayChangePct, range: 0.5...10.0, step: 0.25)
-                hint("Aşırı yükselmiş günleri elemek için.")
+                doubleSliderRow("Max Spread Proxy %", value: $cfg.maxSpreadProxyPct, range: 1.0...12.0, step: 0.25)
+                hint("SpreadProxy = (High-Low)/Close %. Yüksek değerler likidite/spread riski taşır.")
             }
         }
     }

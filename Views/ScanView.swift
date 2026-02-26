@@ -73,6 +73,21 @@ struct ScanView: View {
                 .padding(.horizontal, DS.s16)
                 .padding(.top, DS.s12)
 
+            if let alert = vm.liveAlerts.first {
+                TVCard {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bell.badge.fill")
+                            .foregroundStyle(TVTheme.up)
+                        Text(alert)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(TVTheme.text)
+                            .lineLimit(2)
+                        Spacer()
+                    }
+                }
+                .padding(.horizontal, DS.s16)
+            }
+
             if vm.isScanning {
                 progressCard
                     .padding(.horizontal, DS.s16)

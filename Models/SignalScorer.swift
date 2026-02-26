@@ -591,6 +591,12 @@ enum SignalScorer {
             guard todayChangePct <= config.maxTodayChangePct else { return nil }
         }
 
+        // ---------- Spread proxy (range/close %)
+        let spreadProxyPct = last.close > 0 ? ((last.high - last.low) / last.close) * 100.0 : 0
+        if spreadProxyPct > config.maxSpreadProxyPct {
+            return nil
+        }
+
         // ---------- TR spike
         let trSeries = TrueRange.calculate(candles: candles)
         let trToday = trSeries.last ?? 0
@@ -721,6 +727,7 @@ enum SignalScorer {
             String(format: "Hacim x%.1f", volumeTrend),
             String(format: "Sıkışma %.2f", rangeCompression),
             String(format: "Bugün %+.1f%%", todayChangePct),
+            String(format: "SpreadProxy %.2f%%", spreadProxyPct),
             String(format: "+5 Kapasite %.2f", capScore),
             "Dinamik Eşik \(minScoreGate)"
         ]
