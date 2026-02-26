@@ -21,6 +21,8 @@ struct CandlestickChartView: View {
     // Görsel ayarlar (fit modunda barWidth dinamik hesaplanır)
     private let minBarWidth: CGFloat = 6
     private let maxBarWidth: CGFloat = 14
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var isSelectionLocked: Bool = false
     private let barSpacing: CGFloat = 4
     private let horizontalPadding: CGFloat = 12
     private let axisHeight: CGFloat = 28
@@ -83,7 +85,7 @@ struct CandlestickChartView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            guard !visible.isEmpty else { return }
+                            guard !visible.isEmpty, !isSelectionLocked else { return }
                             let unit = bw + barSpacing
                             let localX = max(0, min(value.location.x - horizontalPadding, CGFloat(visible.count) * unit))
                             let idx = min(max(Int(localX / max(unit, 0.1)), 0), visible.count - 1)
@@ -92,7 +94,9 @@ struct CandlestickChartView: View {
                 )
 
             } else {
-                // Eski davranış: yatay scroll
+                // TradingView-benzeri: yatay scroll + pinch zoom + long-press lock
+                let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
+
                 ScrollView(.horizontal, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 4) {
                         LazyHStack(spacing: barSpacing) {
@@ -101,7 +105,7 @@ struct CandlestickChartView: View {
                                 let isSel = (selectedDate == c.date)
 
                                 CandleStickBar(candle: c, y: y, isSelected: isSel)
-                                    .frame(width: 12, height: chartHeight)
+                                    .frame(width: zoomedWidth, height: chartHeight)
                                     .contentShape(Rectangle())
                                     .onTapGesture { updateSelection(c) }
                             }
@@ -114,13 +118,48 @@ struct CandlestickChartView: View {
                                 let isSel = (selectedDate == date)
 
                                 AxisCell(label: label, isSelected: isSel)
-                                    .frame(width: 12, height: axisHeight)
+                                    .frame(width: zoomedWidth, height: axisHeight)
                             }
                         }
                     }
                     .padding(.horizontal, horizontalPadding)
                     .padding(.vertical, 4)
                 }
+                .simultaneousGesture(
+                    MagnificationGesture()
+                        .onChanged { value in
+                            zoomScale = min(max(value, 0.7), 2.4)
+                        }
+                )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.35)
+                        .onEnded { _ in
+                            isSelectionLocked.toggle()
+#if canImport(UIKit)
+                            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+#endif
+                        }
+                )
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if let s = selected {
+                HStack(spacing: 8) {
+                    Text(isSelectionLocked ? "🔒" : "✳︎")
+                    Text(s.date.formatted(date: .abbreviated, time: .omitted))
+                    Text(String(format: "O %.2f", s.open))
+                    Text(String(format: "H %.2f", s.high))
+                    Text(String(format: "L %.2f", s.low))
+                    Text(String(format: "C %.2f", s.close))
+                    if !fitToWidth { Text(String(format: "x%.1f", zoomScale)) }
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .padding(.top, 4)
+                .padding(.leading, 8)
             }
         }
         .onAppear {
@@ -259,6 +298,11 @@ private struct CandleStickBar: View {
                     .position(x: midX, y: bodyTop + bodyH / 2)
 
                 if isSelected {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.35))
+                        .frame(width: 1, height: geo.size.height)
+                        .position(x: midX, y: geo.size.height / 2)
+
                     Circle()
                         .fill(Color.primary)
                         .frame(width: 5, height: 5)
