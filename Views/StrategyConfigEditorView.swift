@@ -188,7 +188,7 @@ struct StrategyConfigEditorView: View {
                 StepperRowInt(title: "Min Score", value: $cfg.minScore, range: 0...100, step: 1)
                 StepperRowInt(title: "SoftMode Min Quality", value: $cfg.softModeMinQualityScore, range: 0...100, step: 1)
                 StepperRowInt(title: "Lookback Days", value: $cfg.lookbackDays, range: 10...60, step: 1)
-                hint("SoftMode Min Quality, softMode açık olsa bile minimum kalite kapısı uygular. Lookback yalnızca Normal preset'te aktif.")
+                hint("SoftMode Min Quality, softMode açık olsa bile minimum kalite kapısı uygular. Öneri: Relaxed 45 / Normal 50 / Strict 58. Lookback yalnızca Normal preset'te aktif.")
             }
         }
     }

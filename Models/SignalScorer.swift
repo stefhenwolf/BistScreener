@@ -35,6 +35,15 @@ enum TomorrowPreset: String, Codable, CaseIterable {
 
     /// Strict modda Tier C kapalı
     var allowsTierC: Bool { self != .strict }
+
+    /// Preset bazlı önerilen SoftMode kalite tabanı (noise kapısı)
+    var recommendedSoftModeQualityFloor: Int {
+        switch self {
+        case .relaxed: return 45
+        case .normal:  return 50
+        case .strict:  return 58
+        }
+    }
 }
 
 enum LiquidityTier: String, Codable, CaseIterable {
@@ -400,8 +409,13 @@ enum SignalScorer {
             configuredLookback: cfg.lookbackDays,
             overrideLookback: lookback
         )
-        let activeRegime = regime ?? MarketRegimeDetector.detect(from: candles)
+        let activeRegime = regime ?? MarketRegimeDetector.detect(from: candles, config: cfg)
         cfg.minScore = dynamicMinScore(for: preset, regime: activeRegime, config: cfg)
+
+        // Preset bazlı öneri: kullanıcı default değerden ayrılmadıysa otomatik floor uygula.
+        if cfg.softModeMinQualityScore == StrategyConfig.default.softModeMinQualityScore {
+            cfg.softModeMinQualityScore = preset.recommendedSoftModeQualityFloor
+        }
 
         // ✅ v2: Tüm presetler softMode=true
         // Non-linear scoring zaten seçiciliği sağlıyor
