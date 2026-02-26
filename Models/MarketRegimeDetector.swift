@@ -42,9 +42,31 @@ struct MarketRegimeDetector {
 
         let rsi = RSI.lastValue(closes: closes) ?? 50
 
-        if fast > slow && rsi > 52 {
+        // ✅ Yeni filtreler: ADX + volatilite
+        // ADX düşükse trend zayıf kabul et (yan piyasa).
+        let adx = ADX.lastValue(candles: candles) ?? 20
+
+        // ATR/Close yüzdesi: anormal volatiliteyi rejim sınıflamasında filtrelemek için.
+        let atrPct = (ATR.volatilityRatio(candles: candles) ?? 0) * 100
+
+        // Trend gücü çok düşükse direkt yatay.
+        if adx < 16 {
+            return .sideways
+        }
+
+        // Aşırı oynak ama trend gücü yeterince net değilse yatay/karmaşa kabul et.
+        if atrPct >= 7.5 && adx < 22 {
+            return .sideways
+        }
+
+        // Aşırı şok volatilite dönemlerinde yanlış bull/bear etiketinden kaçın.
+        if atrPct >= 9.5 {
+            return .sideways
+        }
+
+        if fast > slow && rsi > 52 && adx >= 20 {
             return .bull
-        } else if fast < slow && rsi < 48 {
+        } else if fast < slow && rsi < 48 && adx >= 20 {
             return .bear
         } else {
             return .sideways
