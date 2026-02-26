@@ -48,9 +48,9 @@ final class ScannerViewModel: ObservableObject {
     }
 
     private enum Keys {
-        static let preset = "scan.tomorrowPreset"
-        static let ultraPreset = "scan.ultraPreset"
-        static let strategyMode = "scan.strategyMode"
+        static let preset = BacktestKeys.scanPreset
+        static let ultraPreset = BacktestKeys.ultraPreset
+        static let strategyMode = BacktestKeys.strategyMode
         static let maxResults = "scan.maxResults"
     }
 

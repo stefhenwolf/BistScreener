@@ -42,6 +42,9 @@ struct StockDetailView: View {
     @AppStorage(BacktestKeys.cooldownDays) private var cooldownDays: Double = 3
     @AppStorage(BacktestKeys.commissionBps) private var commissionBps: Double = 12
     @AppStorage(BacktestKeys.slippageBps) private var slippageBps: Double = 8
+    @AppStorage(BacktestKeys.scanPreset) private var selectedPresetRaw: String = TomorrowPreset.normal.rawValue
+    @AppStorage(BacktestKeys.strategyMode) private var selectedStrategyModeRaw: String = ScanStrategyMode.preBreakout.rawValue
+    @AppStorage(BacktestKeys.ultraPreset) private var selectedUltraPresetRaw: String = UltraPreset.hunter.rawValue
 
     // MARK: - Env
 
@@ -58,6 +61,18 @@ struct StockDetailView: View {
 
     private var shownCandles: [Candle] { Array(candles.suffix(140)) }
     private var activeCandle: Candle? { selectedCandle ?? shownCandles.last }
+
+    private var selectedPreset: TomorrowPreset {
+        TomorrowPreset(rawValue: selectedPresetRaw) ?? .normal
+    }
+
+    private var selectedStrategyMode: ScanStrategyMode {
+        ScanStrategyMode(rawValue: selectedStrategyModeRaw) ?? .preBreakout
+    }
+
+    private var selectedUltraPreset: UltraPreset {
+        UltraPreset(rawValue: selectedUltraPresetRaw) ?? .hunter
+    }
 
     private var isFav: Bool { watchlist.contains(symbol) }
 
@@ -579,16 +594,35 @@ struct StockDetailView: View {
             patterns = snap.patterns
         }
 
-        // PRE-BREAKOUT v2: lookback preset'ten otomatik gelir
-        tomorrow = SignalScorer.scoreTomorrowBuyOnly(
-            candles: recent,
-            preset: .normal
-        )
+        // Liste/ayar ile birebir aynı strateji hesaplaması
+        switch selectedStrategyMode {
+        case .preBreakout:
+            tomorrow = SignalScorer.scoreTomorrowBuyOnly(
+                candles: recent,
+                preset: selectedPreset
+            )
+        case .ultraBounce:
+            let regime = MarketRegimeDetector.detect(from: recent, config: StrategyConfig.load())
+            tomorrow = UltraSignalScorer.score(
+                candles: recent,
+                config: selectedUltraPreset.config,
+                regime: regime
+            )
+        }
 
         if tomorrow == nil {
-            let cfg = StrategyConfig.load()
-            let debug = SignalScorer.debugScoreWithConfig(candles: recent, config: cfg)
-            tomorrowRejectNotes = Array(debug.notes.prefix(4))
+            switch selectedStrategyMode {
+            case .preBreakout:
+                let cfg = StrategyConfig.load()
+                let debug = SignalScorer.debugScoreWithConfig(candles: recent, config: cfg)
+                tomorrowRejectNotes = Array(debug.notes.prefix(4))
+            case .ultraBounce:
+                tomorrowRejectNotes = [
+                    "Ultra Bounce eşiklerini geçemedi",
+                    "Preset: \(selectedUltraPreset.title)",
+                    "ATR/Trend/RSI veya hacim filtresi düşük olabilir"
+                ]
+            }
         } else {
             tomorrowRejectNotes = []
         }

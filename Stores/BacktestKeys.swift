@@ -21,6 +21,7 @@ enum BacktestKeys {
     static let addOnWaitDays    = "backtest.portfolio.addOnWaitDays"
 
     // Signal mode
+    static let scanPreset       = "settings.scanPreset"
     static let strategyMode     = "backtest.signal.strategyMode"
     static let ultraPreset      = "backtest.signal.ultraPreset"
 }

@@ -6,7 +6,7 @@ struct BacktestView: View {
     private let hardMaxPerPositionTL: Double = 5_000
 
     @State private var selectedIndex: IndexOption = .xu030
-    @State private var selectedPreset: TomorrowPreset = .normal
+    @AppStorage(BacktestKeys.scanPreset) private var selectedPresetRaw: String = TomorrowPreset.normal.rawValue
     @AppStorage(BacktestKeys.strategyMode) private var selectedStrategyModeRaw: String = ScanStrategyMode.preBreakout.rawValue
     @AppStorage(BacktestKeys.ultraPreset) private var selectedUltraPresetRaw: String = UltraPreset.hunter.rawValue
 
@@ -49,6 +49,10 @@ struct BacktestView: View {
             addOnMode: BacktestAddOnMode(rawValue: addOnMode) ?? .off,
             addOnWaitDays: Int(addOnWaitDays)
         )
+    }
+
+    private var selectedPreset: TomorrowPreset {
+        TomorrowPreset(rawValue: selectedPresetRaw) ?? .normal
     }
 
     private var selectedStrategyMode: ScanStrategyMode {
@@ -188,7 +192,10 @@ struct BacktestView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(TVTheme.subtext)
 
-                    Picker("Preset", selection: $selectedPreset) {
+                    Picker("Preset", selection: Binding(
+                        get: { selectedPreset },
+                        set: { selectedPresetRaw = $0.rawValue }
+                    )) {
                         ForEach(TomorrowPreset.allCases, id: \.self) { p in
                             Text(p.title).tag(p)
                         }
