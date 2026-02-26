@@ -14,7 +14,7 @@ struct CandlestickChartView: View {
     @Binding var selected: Candle?
 
     @State private var lastSelectedDateForHaptic: Date?
-    @GestureState private var isPressingForDetail: Bool = false
+    @State private var showPressDetail: Bool = false
 
     /// ✅ true: yatay scroll yok, ekrana sığacak kadar son mum gösterilir
     let fitToWidth: Bool
@@ -128,17 +128,18 @@ struct CandlestickChartView: View {
                         .padding(.vertical, 4)
                     }
                     .onAppear {
-                        if let lastIdx = candles.indices.last {
-                            DispatchQueue.main.async {
-                                proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
-                            }
-                        }
+                        scrollToLatest(proxy)
                     }
                     .onChange(of: candles.count) { _ in
-                        if let lastIdx = candles.indices.last {
+                        scrollToLatest(proxy)
+                    }
+                    .onChange(of: selectedDate) { _ in
+                        if let idx = candles.firstIndex(where: { $0.date == selectedDate }) {
                             DispatchQueue.main.async {
-                                proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+                                proxy.scrollTo("candle-\(idx)", anchor: .center)
                             }
+                        } else {
+                            scrollToLatest(proxy)
                         }
                     }
                 }
@@ -148,16 +149,13 @@ struct CandlestickChartView: View {
                             zoomScale = min(max(value, 0.7), 2.4)
                         }
                 )
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.2)
-                        .updating($isPressingForDetail) { value, state, _ in
-                            state = value
-                        }
-                )
+                .onLongPressGesture(minimumDuration: 0.2, maximumDistance: 18, pressing: { pressing in
+                    showPressDetail = pressing
+                }, perform: {})
             }
         }
         .overlay(alignment: .topLeading) {
-            if let s = selected, isPressingForDetail {
+            if let s = selected, showPressDetail {
                 HStack(spacing: 8) {
                     Text(s.date.formatted(date: .abbreviated, time: .omitted))
                     Text(String(format: "O %.2f", s.open))
@@ -176,7 +174,7 @@ struct CandlestickChartView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let s = selected, isPressingForDetail {
+            if let s = selected, showPressDetail {
                 Text("Seçili Gün: \(s.date.formatted(date: .complete, time: .omitted))")
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 10)
@@ -194,6 +192,16 @@ struct CandlestickChartView: View {
     private func updateSelection(_ candle: Candle) {
         selected = candle
         triggerSelectionHapticIfNeeded(for: candle)
+    }
+
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        guard let lastIdx = candles.indices.last else { return }
+        DispatchQueue.main.async {
+            proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+        }
     }
 
     private func triggerSelectionHapticIfNeeded(for candle: Candle) {
