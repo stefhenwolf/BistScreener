@@ -383,6 +383,37 @@ struct StockDetailView: View {
                             .foregroundStyle(rr >= 2.5 ? TVTheme.up : (rr >= 1.5 ? .orange : TVTheme.down))
                     }
                 }
+
+                Divider().overlay(TVTheme.stroke)
+
+                // T+1 operasyon modu (yarın odaklı)
+                let t1TakePct = 5.0
+                let t1ProtectPct = 3.0
+                let t1AbortPct = -2.5
+
+                let t1TakePrice = price * (1.0 + t1TakePct / 100.0)
+                let t1ProtectPrice = price * (1.0 + t1ProtectPct / 100.0)
+                let t1AbortPrice = price * (1.0 + t1AbortPct / 100.0)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("T+1 Operasyon Modu")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(TVTheme.text)
+                        Spacer()
+                        Text("Yarın +5% odağı")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(TVTheme.up)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(TVTheme.up.opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+
+                    t1Row("🚀 Güçlü Açılış", "Açılış ≥ +3% (\(String(format: "%.2f", t1ProtectPrice))) olursa stop'u maliyet üstüne çek.")
+                    t1Row("🎯 Hedef", "Gün içinde +5% (\(String(format: "%.2f", t1TakePrice))) görülürse kademeli realize et.")
+                    t1Row("🛑 Koruma", "Açılış ≤ -2.5% (\(String(format: "%.2f", t1AbortPrice))) ise agresif risk azalt.")
+                }
             }
         }
     }
@@ -415,6 +446,19 @@ struct StockDetailView: View {
             .padding(.vertical, 4)
             .background(color.opacity(0.12))
             .clipShape(Capsule())
+    }
+
+    private func t1Row(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(TVTheme.text)
+            Text(body)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(TVTheme.subtext)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 2)
     }
 
     private func metaLine(from t: TomorrowSignalScore) -> String? {
