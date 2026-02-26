@@ -22,7 +22,6 @@ struct CandlestickChartView: View {
     private let minBarWidth: CGFloat = 6
     private let maxBarWidth: CGFloat = 14
     @State private var zoomScale: CGFloat = 1.0
-    @State private var isSelectionLocked: Bool = false
     private let barSpacing: CGFloat = 4
     private let horizontalPadding: CGFloat = 12
     private let axisHeight: CGFloat = 28
@@ -85,7 +84,7 @@ struct CandlestickChartView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
-                            guard !visible.isEmpty, !isSelectionLocked else { return }
+                            guard !visible.isEmpty else { return }
                             let unit = bw + barSpacing
                             let localX = max(0, min(value.location.x - horizontalPadding, CGFloat(visible.count) * unit))
                             let idx = min(max(Int(localX / max(unit, 0.1)), 0), visible.count - 1)
@@ -94,7 +93,7 @@ struct CandlestickChartView: View {
                 )
 
             } else {
-                // TradingView-benzeri: yatay scroll + pinch zoom + long-press lock
+                // TradingView-benzeri: yatay scroll + pinch zoom
                 let zoomedWidth = min(max(12 * zoomScale, minBarWidth), 28)
 
                 ScrollViewReader { proxy in
@@ -134,6 +133,13 @@ struct CandlestickChartView: View {
                             }
                         }
                     }
+                    .onChange(of: candles.count) { _ in
+                        if let lastIdx = candles.indices.last {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo("candle-\(lastIdx)", anchor: .trailing)
+                            }
+                        }
+                    }
                 }
                 .simultaneousGesture(
                     MagnificationGesture()
@@ -141,21 +147,11 @@ struct CandlestickChartView: View {
                             zoomScale = min(max(value, 0.7), 2.4)
                         }
                 )
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.35)
-                        .onEnded { _ in
-                            isSelectionLocked.toggle()
-#if canImport(UIKit)
-                            UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-#endif
-                        }
-                )
             }
         }
         .overlay(alignment: .topLeading) {
             if let s = selected {
                 HStack(spacing: 8) {
-                    Text(isSelectionLocked ? "🔒" : "✳︎")
                     Text(s.date.formatted(date: .abbreviated, time: .omitted))
                     Text(String(format: "O %.2f", s.open))
                     Text(String(format: "H %.2f", s.high))

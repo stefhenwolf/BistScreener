@@ -582,6 +582,9 @@ struct StockDetailView: View {
                 forceRefresh: forceRefresh
             )
             self.candles = fetched
+            if forceRefresh || selectedCandle == nil {
+                self.selectedCandle = fetched.last
+            }
         } catch {
             self.errorText = error.localizedDescription
         }
@@ -600,6 +603,9 @@ struct StockDetailView: View {
         }
 
         let recent = Array(candles.suffix(160))
+        if let sel = selectedCandle, !recent.contains(where: { $0.date == sel.date }) {
+            selectedCandle = recent.last
+        }
         guard recent.count >= 80 else {
             tomorrow = nil
             tomorrowRejectNotes = ["Yetersiz mum verisi"]
