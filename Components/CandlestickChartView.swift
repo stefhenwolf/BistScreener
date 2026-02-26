@@ -138,6 +138,9 @@ struct CandlestickChartView: View {
                     .onChange(of: candles.count) { _ in
                         scrollToLatest(proxy)
                     }
+                    .onChange(of: candles.last?.date) { _ in
+                        scrollToLatest(proxy)
+                    }
                 }
                 .simultaneousGesture(
                     MagnificationGesture()

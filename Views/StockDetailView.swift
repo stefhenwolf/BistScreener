@@ -603,9 +603,8 @@ struct StockDetailView: View {
         }
 
         let recent = Array(candles.suffix(160))
-        if let sel = selectedCandle, !recent.contains(where: { $0.date == sel.date }) {
-            selectedCandle = recent.last
-        }
+        // Detay ekranı her hesapta en güncel mumdan başlasın.
+        selectedCandle = recent.last
         guard recent.count >= 80 else {
             tomorrow = nil
             tomorrowRejectNotes = ["Yetersiz mum verisi"]
