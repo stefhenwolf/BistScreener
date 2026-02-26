@@ -42,7 +42,11 @@ struct CandlestickChartView: View {
             // ✅ Fit modunda: ekrana sığacak kadar son N mum
             let visible = fitToWidth ? visibleCandles(for: geo.size.width) : candles
 
-            let (minL, maxH) = minMaxLowHigh(from: visible)
+            let (rawMinL, rawMaxH) = minMaxLowHigh(from: visible)
+            let rawSpan = max(rawMaxH - rawMinL, 0.000001)
+            let pad = rawSpan * 0.12   // üst/alt nefes payı (TV benzeri)
+            let minL = rawMinL - pad
+            let maxH = rawMaxH + pad
             let span = max(maxH - minL, 0.000001)
 
             let y: (Double) -> CGFloat = { price in
