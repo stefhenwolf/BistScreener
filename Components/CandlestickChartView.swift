@@ -14,6 +14,7 @@ struct CandlestickChartView: View {
     @Binding var selected: Candle?
 
     @State private var lastSelectedDateForHaptic: Date?
+    @GestureState private var isPressingForDetail: Bool = false
 
     /// ✅ true: yatay scroll yok, ekrana sığacak kadar son mum gösterilir
     let fitToWidth: Bool
@@ -147,10 +148,16 @@ struct CandlestickChartView: View {
                             zoomScale = min(max(value, 0.7), 2.4)
                         }
                 )
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.2)
+                        .updating($isPressingForDetail) { value, state, _ in
+                            state = value
+                        }
+                )
             }
         }
         .overlay(alignment: .topLeading) {
-            if let s = selected {
+            if let s = selected, isPressingForDetail {
                 HStack(spacing: 8) {
                     Text(s.date.formatted(date: .abbreviated, time: .omitted))
                     Text(String(format: "O %.2f", s.open))
@@ -169,7 +176,7 @@ struct CandlestickChartView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if let s = selected {
+            if let s = selected, isPressingForDetail {
                 Text("Seçili Gün: \(s.date.formatted(date: .complete, time: .omitted))")
                     .font(.system(size: 11, weight: .semibold))
                     .padding(.horizontal, 10)
