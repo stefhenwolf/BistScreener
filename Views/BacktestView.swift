@@ -1,5 +1,62 @@
 import SwiftUI
 
+private struct AutoTuneSuggestion {
+    let minScore: Int
+    let softFloor: Int
+    let weightProximity: Double
+    let weightVolumeTrend: Double
+    let weightCLV: Double
+    let weightCompression: Double
+    let weightTrend: Double
+    let confidence: Double
+}
+
+private enum AutoTuner {
+    static func suggest(from trades: [BacktestTradeResult], base: StrategyConfig) -> AutoTuneSuggestion? {
+        guard trades.count >= 30 else { return nil }
+        let winRate = Double(trades.filter(\.isWin).count) / Double(trades.count)
+        let avgReturn = trades.map(\.returnPct).reduce(0, +) / Double(trades.count)
+        let avgDD = trades.map(\.maxDrawdownPct).reduce(0, +) / Double(trades.count)
+
+        var minScore = base.minScore
+        var soft = base.softModeMinQualityScore
+        var wP = base.weightProximity
+        var wV = base.weightVolumeTrend
+        var wC = base.weightCLV
+        var wR = base.weightCompression
+        var wT = base.weightTrend
+
+        if winRate < 0.52 || avgReturn < 0 { minScore += 3; soft += 4; wP += 2; wC += 1; wR += 1; wV -= 1 }
+        else if winRate > 0.62 && avgReturn > 0.8 { minScore -= 1; soft += 1; wV += 1; wT += 1 }
+        if avgDD > 5.5 { minScore += 2; soft += 2; wR += 1 }
+
+        minScore = min(max(minScore, 40), 80)
+        soft = min(max(soft, 42), 75)
+        let confidence = min(0.95, max(0.25, (Double(trades.count) / 200.0) * 0.6 + winRate * 0.4))
+
+        return AutoTuneSuggestion(
+            minScore: minScore,
+            softFloor: soft,
+            weightProximity: min(max(wP, 10), 60),
+            weightVolumeTrend: min(max(wV, 5), 45),
+            weightCLV: min(max(wC, 5), 45),
+            weightCompression: min(max(wR, 5), 35),
+            weightTrend: min(max(wT, 5), 30),
+            confidence: confidence
+        )
+    }
+
+    static func apply(_ s: AutoTuneSuggestion, to config: inout StrategyConfig) {
+        config.minScore = s.minScore
+        config.softModeMinQualityScore = s.softFloor
+        config.weightProximity = s.weightProximity
+        config.weightVolumeTrend = s.weightVolumeTrend
+        config.weightCLV = s.weightCLV
+        config.weightCompression = s.weightCompression
+        config.weightTrend = s.weightTrend
+    }
+}
+
 struct BacktestView: View {
     @ObservedObject var engine: BacktestEngine
     private let initialCapitalTL: Double = 100_000
@@ -606,6 +663,7 @@ struct BacktestView: View {
 
                 regimePerformanceCard(trades: s.trades)
                 walkForwardCard(trades: s.trades)
+                autoTuneCard(trades: s.trades)
             }
         }
     }
@@ -726,6 +784,50 @@ struct BacktestView: View {
                             .foregroundStyle(f.avgReturn >= 0 ? TVTheme.up : TVTheme.down)
                     }
                 }
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func autoTuneCard(trades: [BacktestTradeResult]) -> some View {
+        let suggestion = AutoTuner.suggest(from: trades, base: StrategyConfig.load())
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Auto-Tuning Önerisi")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(TVTheme.text)
+
+            if let s = suggestion {
+                Text(String(format: "Güven: %.0f%%", s.confidence * 100))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(TVTheme.subtext)
+
+                HStack(spacing: 8) {
+                    miniChip("MinScore \(s.minScore)", TVTheme.subtext)
+                    miniChip("Soft \(s.softFloor)", TVTheme.subtext)
+                    miniChip("wP \(Int(s.weightProximity))", TVTheme.subtext)
+                    miniChip("wV \(Int(s.weightVolumeTrend))", TVTheme.subtext)
+                    miniChip("wC \(Int(s.weightCLV))", TVTheme.subtext)
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Öneriyi Uygula") {
+                        var cfg = StrategyConfig.load()
+                        AutoTuner.apply(s, to: &cfg)
+                        cfg.save()
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(TVTheme.surface2)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                }
+            } else {
+                Text("Auto-tuning için en az 30 işlem backtest sonucu gerekiyor.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(TVTheme.subtext)
             }
         }
         .padding(.top, 2)

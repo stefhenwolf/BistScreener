@@ -3,6 +3,59 @@ import SwiftUI
 import UIKit
 #endif
 
+private struct TradeJournalEntry: Codable, Identifiable, Hashable {
+    let id: UUID
+    let symbol: String
+    let date: Date
+    let note: String
+    let signalScore: Int
+    let signalQuality: String
+    let action: String
+
+    init(
+        id: UUID = UUID(),
+        symbol: String,
+        date: Date = Date(),
+        note: String,
+        signalScore: Int,
+        signalQuality: String,
+        action: String = "Not"
+    ) {
+        self.id = id
+        self.symbol = symbol
+        self.date = date
+        self.note = note
+        self.signalScore = signalScore
+        self.signalQuality = signalQuality
+        self.action = action
+    }
+}
+
+private enum TradeJournalStore {
+    private static let key = "trade.journal.local.v1"
+
+    static func load() -> [TradeJournalEntry] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let decoded = try? JSONDecoder().decode([TradeJournalEntry].self, from: data) else { return [] }
+        return decoded
+    }
+
+    static func save(_ entries: [TradeJournalEntry]) {
+        guard let data = try? JSONEncoder().encode(entries) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    static func add(_ entry: TradeJournalEntry) {
+        var all = load()
+        all.insert(entry, at: 0)
+        save(Array(all.prefix(1000)))
+    }
+
+    static func entries(for symbol: String, limit: Int = 20) -> [TradeJournalEntry] {
+        Array(load().filter { $0.symbol == symbol }.prefix(limit))
+    }
+}
+
 struct StockDetailView: View {
 
     // MARK: - Route
@@ -33,6 +86,8 @@ struct StockDetailView: View {
     /// ✅ BUY-only Tomorrow analysis (canlı)
     @State private var tomorrow: TomorrowSignalScore? = nil
     @State private var tomorrowRejectNotes: [String] = []
+    @State private var journalNote: String = ""
+    @State private var journalEntries: [TradeJournalEntry] = []
 
     /// Route üzerinden gelen özet veri (header/fallback hesaplamaları için).
     @State private var snapshot: ScanResult? = nil
@@ -120,6 +175,8 @@ struct StockDetailView: View {
                 if tomorrow != nil {
                     exitStrategyCard
                 }
+
+                tradeJournalCard
 
                 tvChartCard
                 tvPatternsCard
@@ -647,6 +704,73 @@ struct StockDetailView: View {
         )
     }
 
+    private var tradeJournalCard: some View {
+        TVCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("İşlem Günlüğü")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(TVTheme.text)
+                    Spacer()
+                    Text(symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(TVTheme.subtext)
+                }
+
+                TextField("Not (neden girdim/çıkacağım, ders, hata)", text: $journalNote, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...4)
+
+                HStack {
+                    Spacer()
+                    Button("Günlüğe Ekle") {
+                        addJournalEntry()
+                    }
+                    .font(.system(size: 12, weight: .bold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(TVTheme.surface2)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                }
+
+                if !journalEntries.isEmpty {
+                    ForEach(Array(journalEntries.prefix(3))) { e in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(e.date, format: .dateTime.day().month().hour().minute())
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(TVTheme.subtext)
+                            Text(e.note)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(TVTheme.text)
+                                .lineLimit(2)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func reloadJournal() {
+        journalEntries = TradeJournalStore.entries(for: symbol, limit: 20)
+    }
+
+    private func addJournalEntry() {
+        let trimmed = journalNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let entry = TradeJournalEntry(
+            symbol: symbol,
+            note: trimmed,
+            signalScore: tomorrow?.total ?? 0,
+            signalQuality: tomorrow?.quality ?? "-",
+            action: "Not"
+        )
+        TradeJournalStore.add(entry)
+        journalNote = ""
+        reloadJournal()
+    }
+
     // MARK: - Data
 
     @MainActor
@@ -667,6 +791,7 @@ struct StockDetailView: View {
 
         await fetchCandles(forceRefresh: false)
         recalcLiveTomorrowIfNeeded()
+        reloadJournal()
     }
 
     @MainActor
