@@ -281,6 +281,8 @@ struct StockDetailView: View {
                             .padding(.vertical, 2)
                         }
                     }
+
+                    signalQualityPanel(for: t)
                 } else {
                     Text("BUY sinyali yok.")
                         .font(T.foot)
@@ -468,6 +470,53 @@ struct StockDetailView: View {
         let comp = String(format: "Range %.2f", bd.rangeCompression)
         let clv = String(format: "CLV %.2f", bd.clv)
         return [prox, vol, comp, clv].joined(separator: " • ")
+    }
+
+    private func signalQualityPanel(for t: TomorrowSignalScore) -> some View {
+        let b = t.breakdown
+
+        let proxScore = min(max(1.0 - abs(b.proximityPct - 0.99) / 0.08, 0), 1)
+        let volScore = min(max((b.volumeTrend - 0.6) / 1.6, 0), 1)
+        let clvScore = min(max((b.clv - 0.40) / 0.60, 0), 1)
+        let compScore = min(max((1.20 - b.rangeCompression) / 0.90, 0), 1)
+        let trendScore = b.trendOK ? 1.0 : 0.25
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Sinyal Kalite Paneli")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(TVTheme.text)
+
+            qualityRow("Kırılıma Yakınlık", score: proxScore, detail: String(format: "%.1f%%", (b.proximityPct - 1) * 100))
+            qualityRow("Hacim Eğilimi", score: volScore, detail: String(format: "x%.2f", b.volumeTrend))
+            qualityRow("Kapanış Gücü (CLV)", score: clvScore, detail: String(format: "%.2f", b.clv))
+            qualityRow("Sıkışma", score: compScore, detail: String(format: "%.2f", b.rangeCompression))
+            qualityRow("Trend Uyum", score: trendScore, detail: b.trendOK ? "EMA20>EMA50" : "zayıf")
+        }
+        .padding(.top, 4)
+    }
+
+    private func qualityRow(_ title: String, score: Double, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(TVTheme.subtext)
+                Spacer()
+                Text(detail)
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(TVTheme.text)
+            }
+
+            GeometryReader { geo in
+                let w = max(0, min(1, score)) * geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(TVTheme.surface2)
+                    Capsule().fill(score >= 0.65 ? TVTheme.up : (score >= 0.45 ? .orange : TVTheme.down))
+                        .frame(width: w)
+                }
+            }
+            .frame(height: 7)
+        }
     }
 
     private func qualityBadge(_ q: String) -> some View {
