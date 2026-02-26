@@ -207,6 +207,20 @@ struct CandlestickChartView: View {
                 .padding(.leading, 8)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if let s = selected {
+                Text(String(format: "C %.2f", s.close))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(TVTheme.text)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(TVTheme.surface)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(TVTheme.stroke, lineWidth: 1))
+                    .padding(.trailing, 6)
+                    .padding(.top, 6)
+            }
+        }
         .overlay(alignment: .bottom) {
             if let s = selected {
                 Text("Seçili Gün: \(s.date.formatted(date: .complete, time: .omitted))")
