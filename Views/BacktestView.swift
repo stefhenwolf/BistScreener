@@ -361,8 +361,20 @@ struct BacktestView: View {
                 }
 
                 // Config summary
-                HStack {
-                    Button("BIST Varsayılan BPS") {
+                HStack(spacing: 8) {
+                    Button("LargeCap 8/4") {
+                        commissionBps = 8
+                        slippageBps = 4
+                    }
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(TVTheme.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(TVTheme.surface2)
+                    .clipShape(Capsule())
+                    .buttonStyle(.plain)
+
+                    Button("Mid/Small 12/8") {
                         commissionBps = 12
                         slippageBps = 8
                     }
