@@ -268,8 +268,8 @@ struct BacktestView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .disabled(selectedStrategyMode != .preBreakout)
-                    .opacity(selectedStrategyMode == .preBreakout ? 1 : 0.45)
+                    .disabled(selectedStrategyMode == .ultraBounce)
+                    .opacity(selectedStrategyMode == .ultraBounce ? 0.45 : 1)
                 }
 
                 HStack(spacing: 12) {
@@ -283,11 +283,12 @@ struct BacktestView: View {
                     )) {
                         Text("Pre-Breakout").tag(ScanStrategyMode.preBreakout)
                         Text("Ultra Bounce").tag(ScanStrategyMode.ultraBounce)
+                        Text("Ensemble").tag(ScanStrategyMode.ensemble)
                     }
                     .pickerStyle(.segmented)
                 }
 
-                if selectedStrategyMode == .ultraBounce {
+                if selectedStrategyMode == .ultraBounce || selectedStrategyMode == .ensemble {
                     HStack(spacing: 12) {
                         Text("Ultra Preset")
                             .font(.system(size: 13, weight: .semibold))
@@ -305,9 +306,18 @@ struct BacktestView: View {
                     }
                 }
 
-                Text("Backtest sinyal modu: Pre-Breakout veya Ultra Bounce. Ultra modda Sniper/Hunter/Scout eşikleri kullanılır.")
-                    .font(.footnote)
-                    .foregroundStyle(TVTheme.subtext)
+                Group {
+                    switch selectedStrategyMode {
+                    case .preBreakout:
+                        Text("Pre-Breakout: Kırılıma yakın hisseleri tarar. Preset eşikleri aktif.")
+                    case .ultraBounce:
+                        Text("Ultra Bounce: 9-faktörlü bounce stratejisi. Sniper/Hunter/Scout eşikleri kullanılır.")
+                    case .ensemble:
+                        Text("Ensemble: PB + Ultra birlikte değerlendirilir. Regime'a göre ağırlık otomatik ayarlanır.")
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(TVTheme.subtext)
             }
         }
     }
