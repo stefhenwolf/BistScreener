@@ -85,16 +85,29 @@ open BistScreener.xcodeproj
 | Teknik sinyal kırılımı | ![Signal breakdown](Docs/screenshots/04-signal-breakdown.png) |
 | Favoriler / İzleme | ![Favoriler](Docs/screenshots/05-watchlist.png) |
 
-### Hızlı Ekleme Rehberi
+### Otomatik Alma (Script)
 
-1. Ekran görüntülerini alın (iPhone simulator önerilir).
-2. Dosyaları şu isimlerle kaydedin:
-   - `Docs/screenshots/01-home.png`
-   - `Docs/screenshots/02-filters.png`
-   - `Docs/screenshots/03-detail.png`
-   - `Docs/screenshots/04-signal-breakdown.png`
-   - `Docs/screenshots/05-watchlist.png`
-3. Commit + push sonrası görseller README üzerinde görünecektir.
+Repo içinde rehberli bir script var:
+
+```bash
+bash scripts/capture_screenshots.sh
+```
+
+Script, simulator'ü açar, uygulamayı build eder ve her ekran için senden Enter bekleyerek görselleri şu isimlerle kaydeder:
+
+- `Docs/screenshots/01-home.png`
+- `Docs/screenshots/02-filters.png`
+- `Docs/screenshots/03-detail.png`
+- `Docs/screenshots/04-signal-breakdown.png`
+- `Docs/screenshots/05-watchlist.png`
+
+Ardından push:
+
+```bash
+git add Docs/screenshots/*.png
+git commit -m "Add app screenshots"
+git push
+```
 
 ## Yol Haritası (Öneri)
 
