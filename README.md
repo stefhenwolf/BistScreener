@@ -61,9 +61,28 @@ cd BistScreener
 open BistScreener.xcodeproj
 ```
 
-3. Gerekli yerel ayarları (sertifika/provisioning/Firebase plist vb.) kendi ortamınıza göre tamamlayın.
+3. Firebase dosyalarını kendi projeniz için ayarlayın:
+
+```bash
+cp .firebaserc.example .firebaserc
+cp BistScreener/GoogleService-Info.sample.plist BistScreener/GoogleService-Info.plist
+```
+
+Ardından placeholder değerleri kendi Firebase bilgilerinizle doldurun.
 
 4. Uygulamayı simulator veya gerçek cihazda çalıştırın.
+
+## Gizlilik ve Güvenlik
+
+Bu repo, kişisel/ortama özel ayarları **publish etmez**:
+
+- `BistScreener/GoogleService-Info.plist`
+- `GoogleService-Info.root.backup.plist`
+- `.firebaserc`
+- `.env*`, `*.pem`, `*.p12`, `*.key`
+- `.claude/worktrees/*`
+
+Kişisel anahtar/token bilgilerini kesinlikle commit etmeyin.
 
 ## Geliştirme Notları
 

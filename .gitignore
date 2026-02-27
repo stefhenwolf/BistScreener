@@ -67,3 +67,16 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Local secrets / personal config
+BistScreener/GoogleService-Info.plist
+GoogleService-Info.root.backup.plist
+.firebaserc
+.env
+.env.*
+*.pem
+*.p12
+*.key
+
+# Local Claude worktree metadata (keep local, don't publish)
+.claude/worktrees/
