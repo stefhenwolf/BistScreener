@@ -71,6 +71,31 @@ open BistScreener.xcodeproj
 - UI değişikliklerinde mümkünse ilgili testleri güncelleyin.
 - Projede yer alan `.claude/worktrees/*` klasörleri yerel geliştirme akışının parçası olabilir; gereksiz temizleme yapmayın.
 
+## Ekran Görüntüleri
+
+> Aşağıdaki görselleri `Docs/screenshots/` klasörüne ekleyerek README’de otomatik gösterimi kullanabilirsiniz.
+
+### Ana Akışlar
+
+| Ekran | Görsel |
+|---|---|
+| Ana liste / Screener | ![Ana liste](Docs/screenshots/01-home.png) |
+| Filtreler | ![Filtreler](Docs/screenshots/02-filters.png) |
+| Hisse detay | ![Hisse detay](Docs/screenshots/03-detail.png) |
+| Teknik sinyal kırılımı | ![Signal breakdown](Docs/screenshots/04-signal-breakdown.png) |
+| Favoriler / İzleme | ![Favoriler](Docs/screenshots/05-watchlist.png) |
+
+### Hızlı Ekleme Rehberi
+
+1. Ekran görüntülerini alın (iPhone simulator önerilir).
+2. Dosyaları şu isimlerle kaydedin:
+   - `Docs/screenshots/01-home.png`
+   - `Docs/screenshots/02-filters.png`
+   - `Docs/screenshots/03-detail.png`
+   - `Docs/screenshots/04-signal-breakdown.png`
+   - `Docs/screenshots/05-watchlist.png`
+3. Commit + push sonrası görseller README üzerinde görünecektir.
+
 ## Yol Haritası (Öneri)
 
 - [ ] Gelişmiş filtre kombinasyonları
