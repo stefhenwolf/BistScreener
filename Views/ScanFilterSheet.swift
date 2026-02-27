@@ -219,7 +219,7 @@ struct ScanFilterSheet: View {
         case .ultraBounce:
             return "9-faktörlü ultra strateji: RSI bounce, hacim gücü, trend hizalama, pullback kalitesi ve daha fazlası. Günlük %5+ hareket potansiyeli olan hisseleri bulur."
         case .ensemble:
-            return "Pre-Breakout + Ultra birlikte değerlendirilir. İki model onayıyla daha seçici ve daha güvenli sinyal üretir."
+            return "PB + Ultra Bounce birlikte değerlendirilir. Piyasa rejimine göre ağırlık otomatik ayarlanır (Bull→PB↑, Bear→UB↑). İki model hemfikirse konsensüs bonusu eklenir."
         }
     }
 
