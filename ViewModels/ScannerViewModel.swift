@@ -34,7 +34,7 @@ final class ScannerViewModel: ObservableObject {
         didSet { UserDefaults.standard.set(ultraPreset.rawValue, forKey: Keys.ultraPreset) }
     }
 
-    /// Strateji modu seçimi: Pre-Breakout veya Ultra Bounce
+    /// Strateji modu seçimi: Pre-Breakout, Ultra Bounce veya Ensemble (PB+UB regime-aware blend)
     @Published var strategyMode: ScanStrategyMode = .preBreakout {
         didSet { UserDefaults.standard.set(strategyMode.rawValue, forKey: Keys.strategyMode) }
     }
@@ -420,7 +420,7 @@ final class ScannerViewModel: ObservableObject {
             case .ultraBounce:
                 return "\(ultraPreset.rawValue) | minScore: \(ultraPreset.config.minScore)"
             case .ensemble:
-                return "PB:\(preset.rawValue) + UB:\(ultraPreset.rawValue)"
+                return "PB:\(preset.rawValue) + UB:\(ultraPreset.rawValue) | regime-aware blend + consensus"
             }
         }()
         print("""
