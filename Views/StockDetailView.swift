@@ -962,10 +962,14 @@ struct StockDetailView: View {
             case .ensemble:
                 let regime = MarketRegimeDetector.detect(from: recent, config: StrategyConfig.load())
                 let w = EnsembleScorer.weights(for: regime)
+                let pb = SignalScorer.scoreTomorrowBuyOnly(candles: recent, preset: selectedPreset, regime: regime)
+                let ub = UltraSignalScorer.score(candles: recent, config: selectedUltraPreset.config, regime: regime)
+                let pbDesc = pb.map { "PB: \($0.total)" } ?? "PB: —"
+                let ubDesc = ub.map { "UB: \($0.total)" } ?? "UB: —"
                 tomorrowRejectNotes = [
-                    "Ensemble onayı gelmedi",
+                    "\(pbDesc)  |  \(ubDesc)  →  Blend eşiği geçilemedi",
                     "Regime: \(regime.title)  (\(w.label))",
-                    "PB %\(Int(w.pb * 100))  +  UB %\(Int(w.ub * 100)) ağırlıklı blend eşiği geçilemedi"
+                    "Ağırlık: PB %\(Int(w.pb * 100))  +  UB %\(Int(w.ub * 100))  •  Tek model: PB≥68 veya UB≥70"
                 ]
             }
         } else {
