@@ -691,7 +691,7 @@ final class ScannerViewModel: ObservableObject {
             let pb = SignalScorer.scoreTomorrowBuyOnly(candles: recent, preset: preset, regime: regime)
             let ub = UltraSignalScorer.score(candles: recent, config: ultraPreset.config, regime: regime)
 
-            guard let ensemble = ensembleBlend(pb: pb, ub: ub) else {
+            guard let ensemble = EnsembleScorer.blend(pb: pb, ub: ub, regime: regime) else {
                 scanDebugScoreNil += 1
                 return nil
             }
@@ -715,43 +715,7 @@ final class ScannerViewModel: ObservableObject {
         }
     }
 
-    private func ensembleBlend(pb: TomorrowSignalScore?, ub: TomorrowSignalScore?) -> TomorrowSignalScore? {
-        switch (pb, ub) {
-        case let (p?, u?):
-            let total = min(100, Int(round(Double(p.total) * 0.55 + Double(u.total) * 0.45 + 4.0)))
-            let quality: String
-            switch total {
-            case 80...: quality = "A+"
-            case 68...: quality = "A"
-            case 55...: quality = "B"
-            case 42...: quality = "C"
-            default: quality = "D"
-            }
-            var seen = Set<String>()
-            let reasonsMerged = (p.reasons + u.reasons).filter { seen.insert($0).inserted }
-            var reasons = Array(reasonsMerged.prefix(3))
-            if reasons.isEmpty { reasons = ["Ensemble"] }
-            var b = p.breakdown
-            b.notes.append("Ensemble PB+UB")
-            return TomorrowSignalScore(
-                isBuy: true,
-                total: total,
-                quality: quality,
-                signal: .buy,
-                tier: p.tier,
-                reasons: reasons,
-                breakdown: b
-            )
-        case let (p?, nil):
-            return p.total >= 68 ? p : nil
-        case let (nil, u?):
-            return u.total >= 70 ? u : nil
-        default:
-            return nil
-        }
-    }
-
-    /// CandleRepository üzerinden yükler:
+/// CandleRepository üzerinden yükler:
     /// cache kullanır, ama veri günü gerideyse latest refresh de dener.
     private func loadCandlesForScan(symbol: String) async throws -> [Candle] {
         let sym = symbol.normalizedBISTSymbol()
