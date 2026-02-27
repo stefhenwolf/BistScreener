@@ -70,6 +70,11 @@ cp BistScreener/GoogleService-Info.sample.plist BistScreener/GoogleService-Info.
 
 Ardından placeholder değerleri kendi Firebase bilgilerinizle doldurun.
 
+Ayrıca `BistScreener/Info.plist` içindeki aşağıdaki alanları da kendi Google OAuth değerlerinizle güncelleyin:
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_REVERSED_CLIENT_ID`
+- `CFBundleURLSchemes` içindeki `com.googleusercontent.apps.YOUR_CLIENT_ID`
+
 4. Uygulamayı simulator veya gerçek cihazda çalıştırın.
 
 ## Gizlilik ve Güvenlik
